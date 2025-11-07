@@ -1,0 +1,51 @@
+# CME Analysis Platform - Backend Dependencies
+
+# AWS SDK
+boto3==1.34.20
+botocore==1.34.20
+
+# Web Framework (if running FastAPI backend)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Data Processing
+pandas==2.1.4
+numpy==1.26.3
+
+# NLP & ML
+transformers==4.36.2
+torch==2.1.2
+sentencepiece==0.1.99
+
+# Computer Vision (for custom CV processing)
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.9
+
+# Video Processing
+ffmpeg-python==0.2.0
+
+# Utilities
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# JWT & Auth
+PyJWT[crypto]==2.8.0
+cryptography==42.0.0
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+moto==5.0.0  # Mock AWS services
+
+# Logging & Monitoring
+structlog==24.1.0
+
+# Report Generation
+jinja2==3.1.3
+reportlab==4.0.9
+markdown==3.5.2
+weasyprint==60.2  # For HTML to PDF conversion
+
+
