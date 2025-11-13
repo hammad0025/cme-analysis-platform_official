@@ -1,0 +1,23 @@
+# CME Analysis Platform - Cursor Rules
+
+## Project Context
+This is a CME (Compulsory Medical Examination) analysis platform for legal professionals.
+- Backend: AWS Lambda, DynamoDB, S3, API Gateway
+- Frontend: React 18, Tailwind CSS, React Router
+- Infrastructure: AWS CDK
+
+## UI Design Guidelines
+- Use modern, professional design
+- Prefer Tailwind CSS utilities
+- Use subtle gradients and shadows
+- Ensure responsive design
+- Smooth animations and transitions
+- Professional color palette (slate, indigo, purple)
+
+## Key Files
+- Frontend UI: frontend/src/pages/CMEAnalysis.js, CMESessionDetail.js
+- API Service: frontend/src/services/cmeApi.js
+- App Router: frontend/src/App.js
+
+## API Endpoint
+https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod
