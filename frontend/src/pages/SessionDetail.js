@@ -69,10 +69,10 @@ export default function SessionDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
-        <div className="flex items-center">
-          <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <span className="ml-3 text-sm text-neutral-500">Loading session...</span>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="mt-4 text-sm text-slate-600">Loading session...</p>
         </div>
       </div>
     );
@@ -80,14 +80,20 @@ export default function SessionDetail() {
 
   if (!session) {
     return (
-      <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-neutral-900 font-medium">Session not found</p>
+          <div className="w-16 h-16 bg-gradient-to-br from-red-100 to-red-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">Session Not Found</h2>
+          <p className="text-sm text-slate-600 mb-6">The session you're looking for doesn't exist.</p>
           <button
             onClick={() => navigate('/')}
-            className="mt-4 text-sm text-blue-600 hover:text-blue-700 font-medium"
+            className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl hover:shadow-lg transition-shadow"
           >
-            Back to dashboard
+            Back to Dashboard
           </button>
         </div>
       </div>
@@ -95,34 +101,44 @@ export default function SessionDetail() {
   }
 
   const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'analysis', label: 'Analysis' },
-    { id: 'timeline', label: 'Timeline' },
-    { id: 'recording', label: 'Recording' },
+    { id: 'overview', label: 'Overview', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    { id: 'analysis', label: 'Analysis', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+    { id: 'timeline', label: 'Timeline', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    { id: 'recording', label: 'Recording', icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
   ];
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Header */}
-      <header className="bg-white border-b border-neutral-200">
-        <div className="max-w-[1400px] mx-auto px-8 py-6">
+      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-8 py-6">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center text-sm text-neutral-500 hover:text-neutral-900 mb-4"
+            className="flex items-center text-sm font-medium text-slate-600 hover:text-slate-900 mb-4 transition-colors"
           >
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to dashboard
+            Back to Dashboard
           </button>
 
           <div className="flex items-start justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-neutral-900">{session.patient_name || 'CME Session'}</h1>
-              <div className="flex items-center gap-3 mt-2">
+              <h1 className="text-2xl font-bold text-slate-900 mb-2">{session.patient_name || 'CME Session'}</h1>
+              <div className="flex items-center gap-3">
                 <StatusBadge status={session.status} />
-                <span className="text-sm text-neutral-500">
-                  {session.state} • {session.exam_date || 'Date not set'}
+                <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {session.state}
+                </span>
+                <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  {session.exam_date || 'Date not set'}
                 </span>
               </div>
             </div>
@@ -131,13 +147,13 @@ export default function SessionDetail() {
               {session.status === 'completed' && (
                 <button
                   onClick={handleGenerateReport}
-                  className="h-9 px-4 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 text-white text-sm font-semibold rounded-xl shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/40 hover:scale-105 active:scale-95 transition-all duration-200"
                 >
                   Generate Report
                 </button>
               )}
               {session.status === 'created' && (
-                <label className="h-9 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center cursor-pointer">
+                <label className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/40 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer">
                   {uploading ? 'Uploading...' : 'Upload Recording'}
                   <input
                     type="file"
@@ -154,19 +170,22 @@ export default function SessionDetail() {
       </header>
 
       {/* Tabs */}
-      <div className="border-b border-neutral-200 bg-white">
-        <div className="max-w-[1400px] mx-auto px-8">
-          <nav className="flex space-x-8">
+      <div className="bg-white/80 backdrop-blur-md border-b border-slate-200/60">
+        <div className="max-w-7xl mx-auto px-8">
+          <nav className="flex space-x-1">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`py-4 text-sm font-medium border-b-2 transition-colors ${
+                className={`flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 transition-all ${
                   activeTab === tab.id
                     ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-neutral-500 hover:text-neutral-900'
+                    : 'border-transparent text-slate-600 hover:text-slate-900 hover:border-slate-300'
                 }`}
               >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
+                </svg>
                 {tab.label}
               </button>
             ))}
@@ -175,7 +194,7 @@ export default function SessionDetail() {
       </div>
 
       {/* Content */}
-      <main className="max-w-[1400px] mx-auto px-8 py-8">
+      <main className="max-w-7xl mx-auto px-8 py-8">
         {activeTab === 'overview' && <OverviewTab session={session} />}
         {activeTab === 'analysis' && <AnalysisTab session={session} />}
         {activeTab === 'timeline' && <TimelineTab session={session} />}
@@ -187,17 +206,18 @@ export default function SessionDetail() {
 
 function StatusBadge({ status }) {
   const configs = {
-    created: { label: 'Created', color: 'bg-neutral-100 text-neutral-700' },
-    recording_uploaded: { label: 'Uploaded', color: 'bg-amber-100 text-amber-700' },
-    processing: { label: 'Processing', color: 'bg-blue-100 text-blue-700' },
-    completed: { label: 'Completed', color: 'bg-green-100 text-green-700' },
-    error: { label: 'Error', color: 'bg-red-100 text-red-700' },
+    created: { label: 'Created', classes: 'bg-blue-100 text-blue-700 ring-1 ring-blue-200' },
+    recording_uploaded: { label: 'Uploaded', classes: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' },
+    processing: { label: 'Processing', classes: 'bg-purple-100 text-purple-700 ring-1 ring-purple-200 animate-pulse' },
+    completed: { label: 'Completed', classes: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200' },
+    error: { label: 'Error', classes: 'bg-red-100 text-red-700 ring-1 ring-red-200' },
   };
 
   const config = configs[status] || configs.created;
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-lg ${config.color}`}>
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl ${config.classes}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
       {config.label}
     </span>
   );
@@ -205,35 +225,31 @@ function StatusBadge({ status }) {
 
 function OverviewTab({ session }) {
   return (
-    <div className="grid grid-cols-2 gap-8">
-      <div className="bg-white border border-neutral-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold text-neutral-900 mb-4">Session Information</h3>
-        <dl className="space-y-3">
-          <InfoRow label="Patient ID" value={session.patient_id} />
-          <InfoRow label="Patient Name" value={session.patient_name} />
-          <InfoRow label="Examiner" value={session.doctor_name} />
-          <InfoRow label="Exam Date" value={session.exam_date} />
-          <InfoRow label="Attorney" value={session.attorney_name} />
-          <InfoRow label="Case ID" value={session.case_id} />
-        </dl>
-      </div>
+    <div className="grid grid-cols-2 gap-6">
+      <InfoCard
+        title="Session Information"
+        icon="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+        items={[
+          { label: 'Patient ID', value: session.patient_id },
+          { label: 'Patient Name', value: session.patient_name },
+          { label: 'Examiner', value: session.doctor_name },
+          { label: 'Exam Date', value: session.exam_date },
+          { label: 'Attorney', value: session.attorney_name },
+          { label: 'Case ID', value: session.case_id },
+        ]}
+      />
 
-      <div className="bg-white border border-neutral-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold text-neutral-900 mb-4">Recording Details</h3>
-        <dl className="space-y-3">
-          <InfoRow label="State" value={session.state} />
-          <InfoRow label="Recording Mode" value={session.mode} />
-          <InfoRow label="Legal Basis" value={session.recording_allowed?.rule} />
-          <InfoRow
-            label="Video Permitted"
-            value={session.recording_allowed?.video ? 'Yes' : 'No'}
-          />
-          <InfoRow
-            label="Audio Permitted"
-            value={session.recording_allowed?.audio ? 'Yes' : 'No'}
-          />
-        </dl>
-      </div>
+      <InfoCard
+        title="Recording Details"
+        icon="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+        items={[
+          { label: 'State', value: session.state },
+          { label: 'Recording Mode', value: session.mode },
+          { label: 'Legal Basis', value: session.recording_allowed?.rule },
+          { label: 'Video Permitted', value: session.recording_allowed?.video ? 'Yes' : 'No' },
+          { label: 'Audio Permitted', value: session.recording_allowed?.audio ? 'Yes' : 'No' },
+        ]}
+      />
     </div>
   );
 }
@@ -241,99 +257,106 @@ function OverviewTab({ session }) {
 function AnalysisTab({ session }) {
   if (session.status !== 'completed') {
     return (
-      <div className="bg-white border border-neutral-200 rounded-lg p-12 text-center">
-        <div className="max-w-sm mx-auto">
-          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h3 className="text-sm font-medium text-neutral-900 mb-2">Analysis Pending</h3>
-          <p className="text-sm text-neutral-500">
-            Analysis results will appear here once the recording has been processed.
-          </p>
-          {session.processing_stage && (
-            <p className="text-xs text-neutral-400 mt-2">Current stage: {session.processing_stage}</p>
-          )}
-        </div>
-      </div>
+      <EmptyState
+        icon="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        title="Analysis Pending"
+        description="Analysis results will appear here once the recording has been processed."
+        gradient="from-blue-500 to-indigo-600"
+      />
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="bg-white border border-neutral-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold text-neutral-900 mb-4">Declared Tests</h3>
-        <p className="text-sm text-neutral-500">Test declarations detected from audio transcript will appear here.</p>
-      </div>
-
-      <div className="bg-white border border-neutral-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold text-neutral-900 mb-4">Observed Actions</h3>
-        <p className="text-sm text-neutral-500">Visual analysis of performed tests will appear here.</p>
-      </div>
-
-      <div className="bg-white border border-neutral-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold text-neutral-900 mb-4">Discrepancies</h3>
-        <p className="text-sm text-neutral-500">Mismatches between declared and observed tests will appear here.</p>
-      </div>
+      <InfoCard
+        title="Declared Tests"
+        icon="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        items={[{ label: '', value: 'Test declarations detected from audio transcript will appear here.' }]}
+      />
+      <InfoCard
+        title="Observed Actions"
+        icon="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+        items={[{ label: '', value: 'Visual analysis of performed tests will appear here.' }]}
+      />
+      <InfoCard
+        title="Discrepancies"
+        icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        items={[{ label: '', value: 'Mismatches between declared and observed tests will appear here.' }]}
+      />
     </div>
   );
 }
 
 function TimelineTab({ session }) {
   return (
-    <div className="bg-white border border-neutral-200 rounded-lg p-12 text-center">
-      <div className="max-w-sm mx-auto">
-        <div className="w-12 h-12 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-6 h-6 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <h3 className="text-sm font-medium text-neutral-900 mb-2">Timeline View</h3>
-        <p className="text-sm text-neutral-500">
-          A chronological timeline of the examination will be generated after processing.
-        </p>
-      </div>
-    </div>
+    <EmptyState
+      icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+      title="Timeline View"
+      description="A chronological timeline of the examination will be generated after processing."
+      gradient="from-purple-500 to-indigo-600"
+    />
   );
 }
 
 function RecordingTab({ session }) {
   if (!session.video_uri) {
     return (
-      <div className="bg-white border border-neutral-200 rounded-lg p-12 text-center">
-        <div className="max-w-sm mx-auto">
-          <div className="w-12 h-12 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-6 h-6 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <h3 className="text-sm font-medium text-neutral-900 mb-2">No Recording</h3>
-          <p className="text-sm text-neutral-500">Upload a recording to begin analysis.</p>
-        </div>
-      </div>
+      <EmptyState
+        icon="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+        title="No Recording"
+        description="Upload a recording to begin analysis."
+        gradient="from-slate-500 to-slate-600"
+      />
     );
   }
 
   return (
-    <div className="bg-white border border-neutral-200 rounded-lg p-6">
-      <h3 className="text-sm font-semibold text-neutral-900 mb-4">Recording Information</h3>
-      <dl className="space-y-3">
-        <InfoRow label="Video URI" value={session.video_uri} mono />
-        <InfoRow label="Upload Date" value={new Date(session.updated_at * 1000).toLocaleString()} />
+    <InfoCard
+      title="Recording Information"
+      icon="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+      items={[
+        { label: 'Video URI', value: session.video_uri, mono: true },
+        { label: 'Upload Date', value: session.updated_at ? new Date(session.updated_at * 1000).toLocaleString() : 'N/A' },
+      ]}
+    />
+  );
+}
+
+function InfoCard({ title, icon, items }) {
+  return (
+    <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl">
+          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
+          </svg>
+        </div>
+        <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+      </div>
+      <dl className="space-y-4">
+        {items.map((item, index) => (
+          <div key={index}>
+            {item.label && <dt className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">{item.label}</dt>}
+            <dd className={`text-sm text-slate-900 ${item.mono ? 'font-mono text-xs bg-slate-50 p-2 rounded-lg' : ''}`}>
+              {item.value || '—'}
+            </dd>
+          </div>
+        ))}
       </dl>
     </div>
   );
 }
 
-function InfoRow({ label, value, mono = false }) {
+function EmptyState({ icon, title, description, gradient }) {
   return (
-    <div>
-      <dt className="text-xs text-neutral-500">{label}</dt>
-      <dd className={`mt-0.5 text-sm text-neutral-900 ${mono ? 'font-mono text-xs' : ''}`}>
-        {value || '—'}
-      </dd>
+    <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-16 text-center">
+      <div className={`w-20 h-20 bg-gradient-to-br ${gradient} rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg`}>
+        <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
+        </svg>
+      </div>
+      <h3 className="text-lg font-bold text-slate-900 mb-2">{title}</h3>
+      <p className="text-sm text-slate-600 max-w-md mx-auto">{description}</p>
     </div>
   );
 }
-
