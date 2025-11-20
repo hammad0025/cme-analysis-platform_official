@@ -319,13 +319,24 @@ function CreateSessionModal({ onClose, onSuccess }) {
     setSubmitting(true);
 
     try {
+      console.log('Creating session with data:', formData);
       const response = await api.post('/cme/sessions', formData);
+      console.log('Session created:', response.data);
+      
       if (response.data.session_id) {
         navigate(`/sessions/${response.data.session_id}`);
         onSuccess();
+      } else {
+        setError('Session created but no session_id returned');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create session');
+      console.error('Failed to create session:', err);
+      console.error('Error response:', err.response);
+      const errorMsg = err.response?.data?.error || 
+                       err.response?.data?.message || 
+                       err.message ||
+                       'Failed to create session. Please check the console for details.';
+      setError(errorMsg);
     } finally {
       setSubmitting(false);
     }
