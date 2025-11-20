@@ -5,7 +5,7 @@ const AuthContext = createContext();
 
 const userPool = new CognitoUserPool({
   UserPoolId: process.env.REACT_APP_USER_POOL_ID || 'us-east-1_t8m33Ihhq',
-  ClientId: process.env.REACT_APP_USER_POOL_CLIENT_ID || '42e444v111efsa21b6b3v09svp',
+  ClientId: process.env.REACT_APP_USER_POOL_WEB_CLIENT_ID || '42e444v111efsa21b6b3v09svp',
 });
 
 export function AuthProvider({ children }) {
