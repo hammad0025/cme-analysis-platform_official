@@ -570,6 +570,93 @@ def create_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def handle_list_cme_sessions() -> Dict[str, Any]:
+    """
+    List all CME sessions
+    """
+    try:
+        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+        
+        # Scan all sessions (in production, add pagination)
+        response = sessions_table.scan()
+        sessions = response.get('Items', [])
+        
+        # Sort by created_at descending (newest first)
+        sessions.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        
+        logger.info(f"Retrieved {len(sessions)} sessions")
+        
+        return create_response(200, {
+            'sessions': sessions,
+            'count': len(sessions)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error listing sessions: {str(e)}")
+        return create_response(500, {'error': f'Failed to list sessions: {str(e)}'})
+
+
+def handle_get_cme_session(session_id: str) -> Dict[str, Any]:
+    """
+    Get a specific CME session by ID
+    """
+    try:
+        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+        
+        response = sessions_table.get_item(Key={'session_id': session_id})
+        
+        if 'Item' not in response:
+            return create_response(404, {'error': 'Session not found'})
+        
+        session = response['Item']
+        logger.info(f"Retrieved session: {session_id}")
+        
+        return create_response(200, session)
+    
+    except Exception as e:
+        logger.error(f"Error getting session {session_id}: {str(e)}")
+        return create_response(500, {'error': f'Failed to get session: {str(e)}'})
+
+
+def handle_get_cme_report(session_id: str) -> Dict[str, Any]:
+    """
+    Generate and return a CME report for a session
+    """
+    try:
+        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+        
+        response = sessions_table.get_item(Key={'session_id': session_id})
+        
+        if 'Item' not in response:
+            return create_response(404, {'error': 'Session not found'})
+        
+        session = response['Item']
+        
+        # Check if session is completed
+        if session.get('status') != 'completed':
+            return create_response(400, {'error': 'Session is not completed yet'})
+        
+        # Generate report S3 URL (in production, generate actual report)
+        report_key = f"reports/{session_id}/cme-report.pdf"
+        
+        # Generate presigned URL for download
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': S3_BUCKET, 'Key': report_key},
+            ExpiresIn=3600
+        )
+        
+        return create_response(200, {
+            'session_id': session_id,
+            'download_url': download_url,
+            'report_key': report_key
+        })
+    
+    except Exception as e:
+        logger.error(f"Error generating report for {session_id}: {str(e)}")
+        return create_response(500, {'error': f'Failed to generate report: {str(e)}'})
+
+
 def handler(event, context):
     """Main Lambda handler for CME operations"""
     try:
@@ -578,6 +665,7 @@ def handler(event, context):
         # Parse request
         http_method = event.get('httpMethod', 'POST')
         path = event.get('path', '/')
+        path_params = event.get('pathParameters', {}) or {}
         body = json.loads(event.get('body', '{}')) if event.get('body') else {}
         
         # Handle OPTIONS for CORS
@@ -587,6 +675,15 @@ def handler(event, context):
         # Route to appropriate handler
         if path.endswith('/cme/sessions') and http_method == 'POST':
             return handle_create_cme_session(body)
+        elif path.endswith('/cme/sessions') and http_method == 'GET':
+            return handle_list_cme_sessions()
+        elif '/cme/sessions/' in path and http_method == 'GET':
+            # Extract session_id from path
+            session_id = path.split('/cme/sessions/')[-1].split('/')[0]
+            if '/report' in path:
+                return handle_get_cme_report(session_id)
+            else:
+                return handle_get_cme_session(session_id)
         elif path.endswith('/cme/consent') and http_method == 'POST':
             return handle_submit_consent(body)
         elif path.endswith('/cme/upload') and http_method == 'POST':
