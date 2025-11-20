@@ -361,7 +361,10 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
         # Update session with recording URI
         sessions_table.update_item(
             Key={'session_id': session_id},
-            UpdateExpression='SET video_uri = :uri, status = :status, updated_at = :updated, processing_stage = :stage',
+            UpdateExpression='SET video_uri = :uri, #status = :status, updated_at = :updated, processing_stage = :stage',
+            ExpressionAttributeNames={
+                '#status': 'status'
+            },
             ExpressionAttributeValues={
                 ':uri': f"s3://{S3_BUCKET}/{s3_key}",
                 ':status': 'recording_uploaded',
@@ -411,7 +414,10 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
         # Update session status
         sessions_table.update_item(
             Key={'session_id': session_id},
-            UpdateExpression='SET status = :status, processing_stage = :stage, updated_at = :updated',
+            UpdateExpression='SET #status = :status, processing_stage = :stage, updated_at = :updated',
+            ExpressionAttributeNames={
+                '#status': 'status'
+            },
             ExpressionAttributeValues={
                 ':status': 'processing',
                 ':stage': 'transcription',
