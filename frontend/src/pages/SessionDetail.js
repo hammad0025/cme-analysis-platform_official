@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
@@ -10,11 +10,7 @@ export default function SessionDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [uploading, setUploading] = useState(false);
 
-  useEffect(() => {
-    loadSession();
-  }, [sessionId]);
-
-  const loadSession = async () => {
+  const loadSession = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get(`/cme/sessions/${sessionId}`);
@@ -24,7 +20,11 @@ export default function SessionDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
