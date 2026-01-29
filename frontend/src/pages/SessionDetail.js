@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import api from '../services/cmeApi';
 
 export default function SessionDetail() {
   const { sessionId } = useParams();
@@ -14,7 +14,8 @@ export default function SessionDetail() {
     try {
       setLoading(true);
       const response = await api.get(`/cme/sessions/${sessionId}`);
-      setSession(response.data);
+      // API returns { session: {...} } so extract the session object
+      setSession(response.data.session || response.data);
     } catch (error) {
       console.error('Failed to load session:', error);
     } finally {
@@ -152,12 +153,12 @@ export default function SessionDetail() {
                   Generate Report
                 </button>
               )}
-              {session.status === 'created' && (
+              {(session.status === 'created' || !session.video_uri || session.video_uri === '') && (
                 <label className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/40 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer">
                   {uploading ? 'Uploading...' : 'Upload Recording'}
                   <input
                     type="file"
-                    accept="video/*,audio/*"
+                    accept="video/*,audio/*,.mp4,.mp3,.mpeg,.mpg,.wav,.mov,.m4a"
                     onChange={handleFileUpload}
                     className="hidden"
                     disabled={uploading}
@@ -198,7 +199,7 @@ export default function SessionDetail() {
         {activeTab === 'overview' && <OverviewTab session={session} />}
         {activeTab === 'analysis' && <AnalysisTab session={session} />}
         {activeTab === 'timeline' && <TimelineTab session={session} />}
-        {activeTab === 'recording' && <RecordingTab session={session} />}
+        {activeTab === 'recording' && <RecordingTab session={session} onUpload={handleFileUpload} uploading={uploading} />}
       </main>
     </div>
   );
@@ -289,24 +290,43 @@ function AnalysisTab({ session }) {
 
 function TimelineTab({ session }) {
   return (
-    <EmptyState
-      icon="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-      title="Timeline View"
-      description="A chronological timeline of the examination will be generated after processing."
-      gradient="from-purple-500 to-indigo-600"
-    />
+    <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-16 text-center">
+      <div className={`w-20 h-20 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg`}>
+        <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <h3 className="text-lg font-bold text-slate-900 mb-2">Timeline View</h3>
+      <p className="text-sm text-slate-600 max-w-md mx-auto">A chronological timeline of the examination will be generated after processing.</p>
+    </div>
   );
 }
 
-function RecordingTab({ session }) {
-  if (!session.video_uri) {
+function RecordingTab({ session, onUpload, uploading }) {
+  if (!session || !session.video_uri || session.video_uri === '') {
     return (
-      <EmptyState
-        icon="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-        title="No Recording"
-        description="Upload a recording to begin analysis."
-        gradient="from-slate-500 to-slate-600"
-      />
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-16 text-center">
+        <div className="w-20 h-20 bg-gradient-to-br from-slate-500 to-slate-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+          <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-bold text-slate-900 mb-2">No Recording</h3>
+        <p className="text-sm text-slate-600 max-w-md mx-auto mb-6">Upload a recording to begin analysis.</p>
+        <label className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-base font-semibold rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/40 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          {uploading ? 'Uploading...' : 'Upload Recording'}
+          <input
+            type="file"
+            accept="video/*,audio/*,.mp4,.mp3,.mpeg,.mpg,.wav,.mov,.m4a"
+            onChange={onUpload || (() => console.error('onUpload not provided'))}
+            className="hidden"
+            disabled={uploading}
+          />
+        </label>
+      </div>
     );
   }
 

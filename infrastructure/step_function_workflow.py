@@ -21,7 +21,7 @@ def create_cme_processing_workflow(
     nlp_processor_lambda: lambda_.Function,
     video_processor_lambda: lambda_.Function,
     report_generator_lambda: lambda_.Function,
-    sessions_table
+    sessions_table_name: str
 ) -> sfn.StateMachine:
     """
     Create Step Function workflow for CME processing
@@ -110,7 +110,7 @@ def create_cme_processing_workflow(
     # Step 6: Update Session Status to Completed
     update_status = tasks.DynamoUpdateItem(
         scope, "UpdateSessionStatus",
-        table=sessions_table,
+        table_name=sessions_table_name,
         key={
             "session_id": tasks.DynamoAttributeValue.from_string(
                 sfn.JsonPath.string_at("$.session_id")
@@ -142,7 +142,7 @@ def create_cme_processing_workflow(
     # Update status to error on failure
     mark_as_failed = tasks.DynamoUpdateItem(
         scope, "MarkSessionFailed",
-        table=sessions_table,
+        table_name=sessions_table_name,
         key={
             "session_id": tasks.DynamoAttributeValue.from_string(
                 sfn.JsonPath.string_at("$.session_id")
@@ -158,19 +158,20 @@ def create_cme_processing_workflow(
         }
     )
     
-    # Build the workflow chain with error handling
-    update_status.add_catch(
-        handle_error.next(mark_as_failed),
-        errors=["States.ALL"],
-        result_path="$.error"
-    )
-    
+    # Build the workflow chain
     definition = (
         wait_for_transcription
         .next(run_nlp_analysis)
         .next(process_all_tests)
         .next(generate_report)
         .next(update_status)
+    )
+    
+    # Add error handling
+    definition.add_catch(
+        handle_error.next(mark_as_failed),
+        errors=["States.ALL"],
+        result_path="$.error"
     )
     
     # Create the state machine
@@ -232,4 +233,6 @@ def create_s3_upload_trigger(
         s3n.LambdaDestination(trigger_lambda),
         s3.NotificationKeyFilter(prefix="cme-recordings/")
     )
+
+
 

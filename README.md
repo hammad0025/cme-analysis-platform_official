@@ -219,6 +219,23 @@ For questions or support:
 
 ---
 
+## 🔧 Environment Variables
+
+Copy `.env.example` to `.env.local` and configure:
+
+```bash
+# Production API Gateway URL
+REACT_APP_API_URL=https://your-api-gateway.amazonaws.com/prod
+
+# AWS Cognito Configuration
+REACT_APP_USER_POOL_ID=your-user-pool-id
+REACT_APP_USER_POOL_WEB_CLIENT_ID=your-client-id
+```
+
+---
+
 **Built for plaintiff attorneys by attorneys who understand the challenges of fighting biased CMEs.**
+
+
 
 

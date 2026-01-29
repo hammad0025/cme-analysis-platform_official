@@ -83,8 +83,32 @@ export function AuthProvider({ children }) {
         onFailure: (err) => {
           reject(err);
         },
-        newPasswordRequired: (userAttributes) => {
-          reject({ code: 'NewPasswordRequired', userAttributes });
+        newPasswordRequired: (userAttributes, requiredAttributes) => {
+          // Auto-complete password reset with same password if user status requires it
+          cognitoUser.completeNewPasswordChallenge(
+            authDetails.Password,
+            requiredAttributes,
+            {
+              onSuccess: (session) => {
+                cognitoUser.getUserAttributes((err, attributes) => {
+                  if (err) {
+                    reject(err);
+                    return;
+                  }
+                  const userData = {};
+                  attributes.forEach((attr) => {
+                    userData[attr.Name] = attr.Value;
+                  });
+                  setUser({ ...userData, username: cognitoUser.getUsername() });
+                  localStorage.setItem('auth_token', session.getIdToken().getJwtToken());
+                  resolve(session);
+                });
+              },
+              onFailure: (err) => {
+                reject({ code: 'PasswordResetRequiredException', message: err.message || 'Password reset required' });
+              }
+            }
+          );
         },
       });
     });

@@ -62,3 +62,17 @@ htmlcov/
 tmp/
 temp/
 
+# Data folders (large files, sensitive medical data)
+CME Video Recordings/
+TBI Imaging MRI DTI WMH/
+TBI vestibular/
+tbi endocrine/
+tbi prognosis/
+tbi ITON articles/
+disc & facet trauma/
+ortho exam Oregon Hunter/
+Spine Imaging/
+
+# Large result/export files (keep config JSONs)
+aaos_extraction_result.json
+extracted_tests_results.json

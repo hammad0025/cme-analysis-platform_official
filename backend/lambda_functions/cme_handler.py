@@ -179,6 +179,61 @@ class CMEDataModel:
         }
 
 
+def handle_list_cme_sessions() -> Dict[str, Any]:
+    """
+    GET /cme/sessions - List all CME sessions
+    """
+    try:
+        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+        
+        # Scan all sessions
+        response = sessions_table.scan()
+        sessions = response.get('Items', [])
+        
+        # Convert Decimal to float for JSON serialization
+        for session in sessions:
+            if 'created_at' in session:
+                session['created_at'] = int(session['created_at'])
+            if 'updated_at' in session:
+                session['updated_at'] = int(session['updated_at'])
+        
+        return create_response(200, {'sessions': sessions})
+    
+    except Exception as e:
+        logger.error(f"Error listing sessions: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return create_response(500, {'error': str(e)})
+
+
+def handle_get_cme_session(session_id: str) -> Dict[str, Any]:
+    """
+    GET /cme/sessions/{session_id} - Get single CME session
+    """
+    try:
+        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+        response = sessions_table.get_item(Key={'session_id': session_id})
+        
+        if 'Item' not in response:
+            return create_response(404, {'error': 'Session not found'})
+        
+        session = response['Item']
+        
+        # Convert Decimal to int for timestamps
+        if 'created_at' in session:
+            session['created_at'] = int(session['created_at'])
+        if 'updated_at' in session:
+            session['updated_at'] = int(session['updated_at'])
+        
+        return create_response(200, {'session': session})
+    
+    except Exception as e:
+        logger.error(f"Error getting session: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return create_response(500, {'error': str(e)})
+
+
 def handle_create_cme_session(body: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 1: Session Setup & Consent
@@ -361,10 +416,7 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
         # Update session with recording URI
         sessions_table.update_item(
             Key={'session_id': session_id},
-            UpdateExpression='SET video_uri = :uri, #status = :status, updated_at = :updated, processing_stage = :stage',
-            ExpressionAttributeNames={
-                '#status': 'status'
-            },
+            UpdateExpression='SET video_uri = :uri, status = :status, updated_at = :updated, processing_stage = :stage',
             ExpressionAttributeValues={
                 ':uri': f"s3://{S3_BUCKET}/{s3_key}",
                 ':status': 'recording_uploaded',
@@ -416,7 +468,7 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
             Key={'session_id': session_id},
             UpdateExpression='SET #status = :status, processing_stage = :stage, updated_at = :updated',
             ExpressionAttributeNames={
-                '#status': 'status'
+                '#status': 'status'  # 'status' is a reserved keyword in DynamoDB
             },
             ExpressionAttributeValues={
                 ':status': 'processing',
@@ -467,10 +519,111 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
         return create_response(500, {'error': f'Error starting processing: {str(e)}'})
 
 
+def convert_mpeg_to_mp4_mediaconvert(s3_bucket: str, input_key: str, output_key: str) -> Dict[str, Any]:
+    """
+    Convert MPEG/MPG file to MP4 format using AWS MediaConvert
+    Returns job info or error
+    """
+    try:
+        # Get MediaConvert endpoint
+        try:
+            mediaconvert_temp = boto3.client('mediaconvert', region_name=AWS_REGION)
+            endpoints = mediaconvert_temp.describe_endpoints()
+            mediaconvert_endpoint = endpoints['Endpoints'][0]['Url']
+            mediaconvert = boto3.client('mediaconvert', endpoint_url=mediaconvert_endpoint, region_name=AWS_REGION)
+        except Exception as e:
+            logger.error(f"Error getting MediaConvert endpoint: {str(e)}")
+            return {'error': str(e), 'success': False}
+        
+        input_uri = f"s3://{s3_bucket}/{input_key}"
+        output_dir = f"s3://{s3_bucket}/{os.path.dirname(output_key)}/"
+        
+        # Get IAM role ARN - MediaConvert needs a service role with S3 access
+        # Use STS to get account ID
+        sts = boto3.client('sts')
+        account_id = sts.get_caller_identity()['Account']
+        # Use MediaConvert service role (not Lambda execution role)
+        role_arn = f'arn:aws:iam::{account_id}:role/MediaConvertServiceRole'
+        
+        # Create MediaConvert job - simplified for audio extraction
+        job_settings = {
+            'Role': role_arn,
+            'Settings': {
+                'Inputs': [{
+                    'FileInput': input_uri,
+                    'AudioSelectors': {
+                        'Audio Selector 1': {
+                            'DefaultSelection': 'DEFAULT'
+                        }
+                    },
+                    'VideoSelector': {}
+                }],
+                'OutputGroups': [{
+                    'Name': 'File Group',
+                    'OutputGroupSettings': {
+                        'Type': 'FILE_GROUP_SETTINGS',
+                        'FileGroupSettings': {
+                            'Destination': f"s3://{s3_bucket}/{os.path.dirname(output_key)}/"
+                        }
+                    },
+                    'Outputs': [{
+                        'NameModifier': os.path.basename(output_key).replace('.mp4', ''),
+                        'ContainerSettings': {
+                            'Container': 'MP4',
+                            'Mp4Settings': {}
+                        },
+                        'VideoDescription': {
+                            'CodecSettings': {
+                                'Codec': 'H_264',
+                                'H264Settings': {
+                                    'RateControlMode': 'QVBR',
+                                    'QualityTuningLevel': 'SINGLE_PASS',
+                                    'MaxBitrate': 5000000,  # 5 Mbps
+                                    'QvbrSettings': {
+                                        'QvbrQualityLevel': 8
+                                    }
+                                }
+                            }
+                        },
+                        'AudioDescriptions': [{
+                            'CodecSettings': {
+                                'Codec': 'AAC',
+                                'AacSettings': {
+                                    'Bitrate': 96000,
+                                    'CodingMode': 'CODING_MODE_2_0',
+                                    'SampleRate': 48000
+                                }
+                            }
+                        }]
+                    }]
+                }]
+            }
+        }
+        
+        response = mediaconvert.create_job(**job_settings)
+        job_id = response['Job']['Id']
+        
+        logger.info(f"Started MediaConvert job {job_id} to convert {input_key} to {output_key}")
+        
+        return {
+            'success': True,
+            'job_id': job_id,
+            'status': 'SUBMITTED',
+            'output_key': output_key
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating MediaConvert job: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {'error': str(e), 'success': False}
+
+
 def start_transcription_job(session: Dict[str, Any]) -> Dict[str, Any]:
     """
     Step 3: Speech-to-Text & Speaker Diarization
     Start AWS Transcribe Medical job with speaker identification
+    Handles MPEG/MPG files by converting to MP3 first (Transcribe doesn't support MPEG)
     """
     try:
         session_id = session['session_id']
@@ -486,31 +639,107 @@ def start_transcription_job(session: Dict[str, Any]) -> Dict[str, Any]:
         
         job_name = f"cme-transcribe-{session_id}-{int(time.time())}"
         
-        # Start transcription job with medical vocabulary and speaker diarization
-        response = transcribe_client.start_medical_transcription_job(
-            MedicalTranscriptionJobName=job_name,
-            LanguageCode='en-US',
-            MediaFormat='mp4',  # Or detect from file extension
-            Media={
-                'MediaFileUri': f"s3://{bucket}/{key}"
-            },
-            OutputBucketName=bucket,
-            OutputKey=f"cme-transcripts/{session_id}/transcript.json",
-            Settings={
-                'ShowSpeakerLabels': True,
-                'MaxSpeakerLabels': 5,  # Examiner, patient, and possibly observers
-                'ChannelIdentification': False
-            },
-            Specialty='PRIMARYCARE',
-            Type='CONVERSATION'
-        )
+        # Detect media format from file extension
+        file_extension = key.split('.')[-1].lower() if '.' in key else 'mp4'
         
-        logger.info(f"Started transcription job: {job_name}")
+        # For MPEG/MPG files, convert to MP4 first using MediaConvert
+        if file_extension in ['mpeg', 'mpg']:
+            logger.info(f"MPEG file detected. Starting automatic conversion to MP4...")
+            converted_key = f"cme-converted/{session_id}/video.mp4"
+            conversion_result = convert_mpeg_to_mp4_mediaconvert(bucket, key, converted_key)
+            
+            if not conversion_result.get('success'):
+                logger.error(f"MediaConvert conversion failed: {conversion_result.get('error')}")
+                return {
+                    'error': f"Failed to convert MPEG file: {conversion_result.get('error', 'Unknown error')}",
+                    'job_name': None,
+                    'status': 'FAILED',
+                    'conversion_job_id': conversion_result.get('job_id')
+                }
+            
+            # Update session with conversion job ID
+            sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+            sessions_table.update_item(
+                Key={'session_id': session_id},
+                UpdateExpression='SET conversion_job_id = :job_id, processing_stage = :stage, updated_at = :updated',
+                ExpressionAttributeValues={
+                    ':job_id': conversion_result['job_id'],
+                    ':stage': 'converting',
+                    ':updated': int(time.time())
+                }
+            )
+            
+            # Return info that conversion is in progress
+            return {
+                'job_name': None,
+                'status': 'CONVERTING',
+                'conversion_job_id': conversion_result['job_id'],
+                'message': 'MPEG file is being converted to MP4. Transcription will start automatically after conversion completes.',
+                'estimated_time': 'Conversion typically takes 5-15 minutes depending on file size'
+            }
+        else:
+            # Format mapping for Transcribe
+            format_mapping = {
+                'mp4': 'mp4',
+                'mp3': 'mp3',
+                'wav': 'wav',
+                'flac': 'flac',
+                'ogg': 'ogg',
+                'amr': 'amr',
+                'webm': 'webm',
+                'm4a': 'mp4',
+                'mov': 'mp4'
+            }
+            media_format = format_mapping.get(file_extension, 'mp4')
+        
+        # Use Medical Transcribe for better medical vocabulary (now that MPEG is converted)
+        use_medical = True
+        
+        if use_medical:
+            # Use Medical Transcribe for better medical vocabulary
+            response = transcribe_client.start_medical_transcription_job(
+                MedicalTranscriptionJobName=job_name,
+                LanguageCode='en-US',
+                MediaFormat=media_format,
+                Media={
+                    'MediaFileUri': f"s3://{bucket}/{key}"
+                },
+                OutputBucketName=bucket,
+                OutputKey=f"cme-transcripts/{session_id}/transcript.json",
+                Settings={
+                    'ShowSpeakerLabels': True,
+                    'MaxSpeakerLabels': 5,  # Examiner, patient, and possibly observers
+                    'ChannelIdentification': False
+                },
+                Specialty='PRIMARYCARE',
+                Type='CONVERSATION'
+            )
+        else:
+            # Use regular Transcribe for MPEG/MPG files (supports more formats)
+            logger.info(f"Using regular Transcribe for {file_extension} format (MPEG/MPG not supported by Medical Transcribe)")
+            response = transcribe_client.start_transcription_job(
+                TranscriptionJobName=job_name,
+                LanguageCode='en-US',
+                MediaFormat=media_format,
+                Media={
+                    'MediaFileUri': f"s3://{bucket}/{key}"
+                },
+                OutputBucketName=bucket,
+                OutputKey=f"cme-transcripts/{session_id}/transcript.json",
+                Settings={
+                    'ShowSpeakerLabels': True,
+                    'MaxSpeakerLabels': 5,
+                    'ChannelIdentification': False
+                }
+            )
+        
+        logger.info(f"Started transcription job: {job_name} (Medical: {use_medical})")
         
         return {
             'job_name': job_name,
             'status': 'IN_PROGRESS',
-            'output_uri': f"s3://{bucket}/cme-transcripts/{session_id}/transcript.json"
+            'output_uri': f"s3://{bucket}/cme-transcripts/{session_id}/transcript.json",
+            'is_medical': use_medical
         }
         
     except Exception as e:
@@ -576,93 +805,6 @@ def create_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def handle_list_cme_sessions() -> Dict[str, Any]:
-    """
-    List all CME sessions
-    """
-    try:
-        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
-        
-        # Scan all sessions (in production, add pagination)
-        response = sessions_table.scan()
-        sessions = response.get('Items', [])
-        
-        # Sort by created_at descending (newest first)
-        sessions.sort(key=lambda x: x.get('created_at', 0), reverse=True)
-        
-        logger.info(f"Retrieved {len(sessions)} sessions")
-        
-        return create_response(200, {
-            'sessions': sessions,
-            'count': len(sessions)
-        })
-    
-    except Exception as e:
-        logger.error(f"Error listing sessions: {str(e)}")
-        return create_response(500, {'error': f'Failed to list sessions: {str(e)}'})
-
-
-def handle_get_cme_session(session_id: str) -> Dict[str, Any]:
-    """
-    Get a specific CME session by ID
-    """
-    try:
-        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
-        
-        response = sessions_table.get_item(Key={'session_id': session_id})
-        
-        if 'Item' not in response:
-            return create_response(404, {'error': 'Session not found'})
-        
-        session = response['Item']
-        logger.info(f"Retrieved session: {session_id}")
-        
-        return create_response(200, session)
-    
-    except Exception as e:
-        logger.error(f"Error getting session {session_id}: {str(e)}")
-        return create_response(500, {'error': f'Failed to get session: {str(e)}'})
-
-
-def handle_get_cme_report(session_id: str) -> Dict[str, Any]:
-    """
-    Generate and return a CME report for a session
-    """
-    try:
-        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
-        
-        response = sessions_table.get_item(Key={'session_id': session_id})
-        
-        if 'Item' not in response:
-            return create_response(404, {'error': 'Session not found'})
-        
-        session = response['Item']
-        
-        # Check if session is completed
-        if session.get('status') != 'completed':
-            return create_response(400, {'error': 'Session is not completed yet'})
-        
-        # Generate report S3 URL (in production, generate actual report)
-        report_key = f"reports/{session_id}/cme-report.pdf"
-        
-        # Generate presigned URL for download
-        download_url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': S3_BUCKET, 'Key': report_key},
-            ExpiresIn=3600
-        )
-        
-        return create_response(200, {
-            'session_id': session_id,
-            'download_url': download_url,
-            'report_key': report_key
-        })
-    
-    except Exception as e:
-        logger.error(f"Error generating report for {session_id}: {str(e)}")
-        return create_response(500, {'error': f'Failed to generate report: {str(e)}'})
-
-
 def handler(event, context):
     """Main Lambda handler for CME operations"""
     try:
@@ -671,7 +813,6 @@ def handler(event, context):
         # Parse request
         http_method = event.get('httpMethod', 'POST')
         path = event.get('path', '/')
-        path_params = event.get('pathParameters', {}) or {}
         body = json.loads(event.get('body', '{}')) if event.get('body') else {}
         
         # Handle OPTIONS for CORS
@@ -679,17 +820,23 @@ def handler(event, context):
             return create_response(200, {})
         
         # Route to appropriate handler
-        if path.endswith('/cme/sessions') and http_method == 'POST':
-            return handle_create_cme_session(body)
-        elif path.endswith('/cme/sessions') and http_method == 'GET':
+        # Handle path parameters from API Gateway
+        path_parts = path.rstrip('/').split('/')
+        
+        # GET /cme/sessions - List all sessions
+        if (path == '/cme/sessions' or path.endswith('/cme/sessions')) and http_method == 'GET':
             return handle_list_cme_sessions()
+        # POST /cme/sessions - Create new session
+        elif (path == '/cme/sessions' or path.endswith('/cme/sessions')) and http_method == 'POST':
+            return handle_create_cme_session(body)
+        # GET /cme/sessions/{session_id} - Get single session
         elif '/cme/sessions/' in path and http_method == 'GET':
-            # Extract session_id from path
+            # Extract session_id from path (handle both /cme/sessions/{id} and /cme/sessions/{id}/report)
             session_id = path.split('/cme/sessions/')[-1].split('/')[0]
-            if '/report' in path:
-                return handle_get_cme_report(session_id)
-            else:
+            if session_id and session_id != 'sessions':
                 return handle_get_cme_session(session_id)
+            else:
+                return create_response(400, {'error': 'Invalid session ID'})
         elif path.endswith('/cme/consent') and http_method == 'POST':
             return handle_submit_consent(body)
         elif path.endswith('/cme/upload') and http_method == 'POST':
@@ -697,7 +844,8 @@ def handler(event, context):
         elif path.endswith('/cme/process') and http_method == 'POST':
             return handle_start_cme_processing(body)
         else:
-            return create_response(404, {'error': 'Endpoint not found'})
+            logger.warning(f"Endpoint not found: {http_method} {path}")
+            return create_response(404, {'error': f'Endpoint not found: {http_method} {path}'})
     
     except Exception as e:
         logger.error(f"Error in CME handler: {str(e)}")

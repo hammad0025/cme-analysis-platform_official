@@ -35,13 +35,33 @@ def handler(event, context):
         
         logger.info(f"Checking transcription status for job: {job_name}")
         
-        # Get transcription job status
-        response = transcribe_client.get_medical_transcription_job(
-            MedicalTranscriptionJobName=job_name
-        )
-        
-        job = response['MedicalTranscriptionJob']
-        status = job['TranscriptionJobStatus']
+        # Check if it's a medical or regular transcription job
+        # Try medical first, then fall back to regular
+        is_medical = False
+        try:
+            response = transcribe_client.get_medical_transcription_job(
+                MedicalTranscriptionJobName=job_name
+            )
+            job = response['MedicalTranscriptionJob']
+            status = job['TranscriptionJobStatus']
+            is_medical = True
+        except Exception as med_error:
+            # Not a medical job or error, try regular transcription
+            error_code = med_error.response.get('Error', {}).get('Code', '') if hasattr(med_error, 'response') else ''
+            if error_code == 'BadRequestException' or 'not found' in str(med_error).lower():
+                try:
+                    response = transcribe_client.get_transcription_job(
+                        TranscriptionJobName=job_name
+                    )
+                    job = response['TranscriptionJob']
+                    status = job['TranscriptionJobStatus']
+                    is_medical = False
+                except Exception as e:
+                    logger.error(f"Error getting transcription job: {str(e)}")
+                    raise
+            else:
+                # Re-raise if it's a different error
+                raise
         
         logger.info(f"Transcription job status: {status}")
         
@@ -50,8 +70,11 @@ def handler(event, context):
             raise TranscriptionInProgressError(f"Transcription still {status}")
         
         elif status == 'COMPLETED':
-            # Get transcript URI
-            transcript_uri = job['Transcript']['TranscriptFileUri']
+            # Get transcript URI (different structure for medical vs regular)
+            if is_medical:
+                transcript_uri = job['Transcript']['TranscriptFileUri']
+            else:
+                transcript_uri = job['Transcript']['TranscriptFileUri']
             
             # Download and parse transcript
             transcript_data = download_transcript(transcript_uri)
@@ -146,4 +169,6 @@ def download_transcript(transcript_uri: str) -> dict:
 
 
 import time
+
+
 

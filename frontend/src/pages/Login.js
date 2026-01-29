@@ -29,8 +29,8 @@ export default function Login() {
         setError('User not found. Please check your email.');
       } else if (err.code === 'NotAuthorizedException') {
         setError('Incorrect password. Please try again.');
-      } else if (err.code === 'NewPasswordRequired') {
-        setError('Please contact your administrator to reset your password.');
+      } else if (err.code === 'NewPasswordRequired' || err.code === 'PasswordResetRequiredException') {
+        setError('Password reset required. Please contact your administrator.');
       } else {
         setError(err.message || 'Failed to login. Please try again.');
       }
