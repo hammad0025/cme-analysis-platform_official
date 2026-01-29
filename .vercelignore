@@ -1,0 +1,35 @@
+# Exclude large data folders from Vercel deployment
+CME Video Recordings/
+TBI Imaging MRI DTI WMH/
+TBI vestibular/
+tbi endocrine/
+tbi prognosis/
+tbi ITON articles/
+disc & facet trauma/
+ortho exam Oregon Hunter/
+Spine Imaging/
+
+# Exclude large result files
+aaos_extraction_result.json
+extracted_tests_results.json
+
+# Exclude backend (not needed for frontend deployment)
+backend/
+infrastructure/
+scripts/
+
+# Exclude documentation (not needed for deployment)
+*.md
+!README.md
+
+# Exclude deployment scripts
+*.sh
+
+# Exclude other unnecessary files
+cdk.out/
+node_modules/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
