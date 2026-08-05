@@ -84,13 +84,29 @@ python scripts/run_claim_verifier.py --offline --dry-run   # preview
 python scripts/run_claim_verifier.py --offline             # rewrite sample-case JSON
 ```
 
-No `CME_ALLOW_LOCAL_ANALYSIS` needed for `--offline`? Actually the gate runs before offline check. Let me verify - _check_local_gate runs at start regardless. So offline still needs CME_ALLOW_LOCAL_ANALYSIS=1 OR --force.
+Note: `--offline` still requires `CME_ALLOW_LOCAL_ANALYSIS=1` (or `--force`) — the cost gate runs before the offline check. For CI, set the env var in the workflow or pass `--force`.
 
-That's correct for lockdown - even offline path goes through gate. User might want offline without gate for CI - but user asked for lockdown. The test file and docs should reflect this.
+## Production API auth (added 2026-08-05)
 
-Actually re-read run_claim_verifier - _check_local_gate runs before everything. So --offline still needs the gate. For CI that's fine if they set the env in CI or use --force.
+All non-OPTIONS methods on the CME Analysis API (`g4dzem9rtk`, stage `prod`) require a
+Cognito ID token from the `cme-analysis-users` pool (`us-east-1_t8m33Ihhq`), sent as
+`Authorization: Bearer <IdToken>`. Authorizer: `cme-cognito-authorizer` (API Gateway,
+type COGNITO_USER_POOLS). OPTIONS remains open for CORS preflight.
 
-For demo doc I'll mention --offline with gate or --force for CI.
+Consequences:
+
+- Production frontend works unchanged — it logs in via Cognito and attaches the token.
+- **Localhost dev mode (`REACT_APP_DEV_MODE=true`) can no longer hit the live API** —
+  its fake `dev-mode-token` is rejected with 401. Use mock mode, or set
+  `REACT_APP_DEV_MODE=false` and log in with real pool credentials.
+- Operator scripts in `scripts/` that call the API directly need a token, e.g.:
+
+  ```bash
+  aws cognito-idp initiate-auth --auth-flow USER_PASSWORD_AUTH \
+    --client-id 42e444v111efsa21b6b3v09svp \
+    --auth-parameters USERNAME=<user>,PASSWORD=<pass> \
+    --query 'AuthenticationResult.IdToken' --output text
+  ```
 
 ## Frontend lockdown
 
