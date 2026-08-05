@@ -636,13 +636,36 @@ class CMEReportGenerator:
         distress_dismissed = sum(1 for d in patient_distress if d.get('doctor_response') == 'dismissive')
         crying_events = sum(1 for d in patient_distress if d.get('distress_type') == 'emotional')
         tests_not_observed = len(inattentive_tests)
-        
+
+        # Tests the vision model could not judge. These are NOT discrepancies:
+        # they must never be counted as "not performed" or presented as
+        # evidence against the examiner.
+        tests_unanalyzed = sum(
+            1 for step in declared_steps
+            if step_actions.get(step['declared_step_id'], {}).get('motion_present')
+            in ('analysis_unavailable', 'unknown', None)
+        )
+        incomplete_banner = ""
+        if tests_unanalyzed:
+            incomplete_banner = f"""
+        <div style="background:#fff3cd;border:2px solid #e0a800;border-radius:6px;
+                    padding:16px;margin:16px 0;color:#664d03;">
+            <strong>⚠️ INCOMPLETE ANALYSIS — NOT FOR FILING</strong><br>
+            Video analysis did not run for {tests_unanalyzed} of {total_tests_mentioned}
+            declared test(s), so this report cannot say whether those tests were
+            performed. Absence of a finding here is <em>not</em> evidence that the
+            examiner skipped a test. Re-run the analysis once vision processing is
+            available before relying on this report.
+        </div>
+"""
+
         # Build HTML content
         content = f"""
         <div class="header">
             <h1>📋 CME Analysis Report</h1>
             <p>Compulsory Medical Examination - AI-Powered Analysis</p>
         </div>
+{incomplete_banner}
         
         <div class="metadata">
             <div class="metadata-item">
@@ -855,6 +878,11 @@ class CMEReportGenerator:
             # Better handling of missing video analysis
             if motion_present == 'unknown':
                 motion_display = "⏳ Video Analysis Pending"
+                motion_class = "pending"
+            elif motion_present == 'analysis_unavailable':
+                # Vision model did not return a verdict. Never present this as
+                # evidence for or against the examiner.
+                motion_display = "⚠️ Not Analyzed — vision analysis unavailable"
                 motion_class = "pending"
             elif motion_present == 'performed':
                 motion_display = "✅ Performed"

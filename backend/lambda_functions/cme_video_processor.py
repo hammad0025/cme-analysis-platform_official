@@ -745,11 +745,10 @@ def process_video_for_cme_test(
         logger.info(f"[Bedrock Analysis] {test_type} → {motion_present} (confidence: {confidence:.2f})")
         
     except Exception as e:
-        logger.warning(f"Bedrock analysis failed, using heuristic: {e}")
-        # Fallback to heuristic
-        motion_present, pose_match, confidence = use_fast_heuristic(
-            test_type, test_timestamp, motion_job_id, pose_job_id
-        )
+        # No guessing: without a model verdict the only honest output is
+        # "we could not analyze this", never a performed/not_observed call.
+        logger.error(f"Vision analysis failed for {test_type}; recording as unavailable: {e}")
+        motion_present, pose_match, confidence = 'analysis_unavailable', 'unknown', 0.0
     
     # *** PERSIST OBSERVED ACTION TO DYNAMODB ***
     action_id = f"action_{int(time.time())}"
@@ -858,7 +857,7 @@ Analyze the transcript and return JSON:
 Be thorough - catch ALL variations of language. Doctors are creative in how they describe things."""
 
         response = bedrock_client.invoke_model(
-            modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+            modelId='us.anthropic.claude-sonnet-4-5-20250929-v1:0',
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
                 'max_tokens': 800,
@@ -1096,7 +1095,7 @@ Analyze and return JSON:
 }}"""
 
         response = bedrock_client.invoke_model(
-            modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+            modelId='us.anthropic.claude-sonnet-4-5-20250929-v1:0',
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
                 'max_tokens': 600,
@@ -1195,7 +1194,7 @@ Was this test ACTUALLY PERFORMED? Return JSON:
 {{"performed": true/false, "confidence": 0.0-1.0, "reasoning": "why"}}"""
         
         response = bedrock_client.invoke_model(
-            modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+            modelId='us.anthropic.claude-sonnet-4-5-20250929-v1:0',
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
                 'max_tokens': 300,
@@ -1221,13 +1220,20 @@ Was this test ACTUALLY PERFORMED? Return JSON:
         logger.warning(f"Bedrock error: {e}")
         import traceback
         logger.error(traceback.format_exc())
-    
-    # Fallback - return dict format
-    motion_present, pose_match, confidence = use_fast_heuristic(test_type, test_timestamp, None, None)
+
+    # The vision model did not return a usable verdict. Report that honestly
+    # instead of guessing: a fabricated "not_observed" reads as a finding that
+    # the doctor skipped a test, which is exactly the accusation this report
+    # must never make without evidence.
+    logger.error(
+        f"[Vision unavailable] {test_type} @ {test_timestamp:.1f}s -> analysis_unavailable "
+        f"(no model verdict; NOT inferring performed/not_observed)"
+    )
     return {
-        'motion_present': motion_present,
-        'pose_match': pose_match,
-        'confidence': confidence
+        'motion_present': 'analysis_unavailable',
+        'pose_match': 'unknown',
+        'confidence': 0.0,
+        'analysis_error': 'vision_model_unavailable',
     }
 
 
@@ -1238,16 +1244,19 @@ def use_fast_heuristic(
     pose_job_id: Optional[str]
 ) -> tuple:
     """
-    Fast heuristic based on Dr. Hunter's ground truth analysis.
-    
-    Dr. Hunter found: 27 performed out of 64 mentioned = 42% performed rate
-    Hands-on exam period: 907-1661 seconds (only tests in this window were performed)
-    
-    Conservative approach: Only mark as "performed" if:
-    1. Test is during hands-on exam period (907-1661s)
-    2. Test type matches Dr. Hunter's actual performed tests
-    3. Otherwise mark as "not_observed" (discrepancy)
-    
+    DEPRECATED - DO NOT USE FOR VERDICTS.
+
+    This scoring was calibrated to ONE video (Dr. Hunter's Gadson ground
+    truth): it hardcodes that exam's hands-on window (907-1661s) and that
+    case's 42% performed rate. Applied to any other recording it invents
+    findings -- marking tests "not_observed" (i.e. accusing the examiner of
+    skipping a test) purely because of where they fall on a different
+    video's clock.
+
+    Kept only for reference/backfill of the original calibration study.
+    Callers must treat an unavailable vision model as
+    'analysis_unavailable', never as a performed/not_observed verdict.
+
     Returns: (motion_present, pose_match, confidence)
     """
     # Dr. Hunter's actual performed tests (from ground truth)
