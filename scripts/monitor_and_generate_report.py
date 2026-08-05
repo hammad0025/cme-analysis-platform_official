@@ -8,11 +8,13 @@ import time
 import json
 from pathlib import Path
 
+from cme_api_auth import auth_headers
+
 API_BASE_URL = "https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod"
 
 def get_session_status(session_id: str):
     """Get current session status"""
-    response = requests.get(f"{API_BASE_URL}/cme/sessions/{session_id}")
+    response = requests.get(f"{API_BASE_URL}/cme/sessions/{session_id}", headers=auth_headers())
     if response.status_code == 200:
         data = response.json()
         return data.get('session', data)

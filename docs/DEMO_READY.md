@@ -31,9 +31,14 @@ Footer should show **Live API** (not “Mock API”).
 
 ## Login
 
-Dev mode (default): app auto-signs in as **Demo Reviewer**. Or `/login` with any username/password (e.g. `hammad` / `demo`).
+> **Since 2026-08-05 the live API requires real Cognito auth** (see
+> `LOCKDOWN.md`, "Production API auth"). Dev mode's fake token gets 401s
+> from the live API. To demo against the live API, set
+> `REACT_APP_DEV_MODE=false` and log in at `/login` with real
+> `cme-analysis-users` pool credentials. Dev mode still works fully with
+> the mock API (`REACT_APP_USE_MOCK_API=true`).
 
-Cognito is optional — set `REACT_APP_DEV_MODE=false` only if you need real pool auth.
+Dev mode (`REACT_APP_DEV_MODE=true`): app auto-signs in as **Demo Reviewer** — mock API only.
 
 ---
 

@@ -15,8 +15,15 @@ import glob
 from pathlib import Path
 from typing import List
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cme_api_auth import api_session
+
 # API endpoint
 API_BASE_URL = "https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod"
+# Authenticated session for API calls. The presigned S3 upload below must
+# keep using plain requests -- S3 rejects presigned URLs sent with an
+# Authorization header.
+api = api_session()
 
 def create_session(patient_id: str, patient_name: str, doctor_name: str, state: str = "FL", exam_date: str = None, case_id: str = None, attorney_name: str = None):
     """Create a new CME session"""
@@ -38,7 +45,7 @@ def create_session(patient_id: str, patient_name: str, doctor_name: str, state: 
     print(f"   Doctor: {doctor_name}")
     print(f"   State: {state}")
     
-    response = requests.post(f"{API_BASE_URL}/cme/sessions", json=payload)
+    response = api.post(f"{API_BASE_URL}/cme/sessions", json=payload)
     
     if response.status_code == 201:
         data = response.json()
@@ -84,7 +91,7 @@ def upload_file(session_id: str, file_path: str):
         'file_size': file_size
     }
     
-    response = requests.post(f"{API_BASE_URL}/cme/upload", json=upload_payload)
+    response = api.post(f"{API_BASE_URL}/cme/upload", json=upload_payload)
     
     if response.status_code != 200:
         print(f"❌ Failed to get upload URL: {response.status_code}")
@@ -111,7 +118,7 @@ def start_processing(session_id: str):
     """Start processing the uploaded files"""
     print(f"\n🚀 Starting processing pipeline...")
     
-    response = requests.post(f"{API_BASE_URL}/cme/process", json={'session_id': session_id})
+    response = api.post(f"{API_BASE_URL}/cme/process", json={'session_id': session_id})
     
     if response.status_code == 200:
         data = response.json()
@@ -131,7 +138,7 @@ def start_processing(session_id: str):
 
 def get_session_status(session_id: str):
     """Get current session status"""
-    response = requests.get(f"{API_BASE_URL}/cme/sessions/{session_id}")
+    response = api.get(f"{API_BASE_URL}/cme/sessions/{session_id}")
     
     if response.status_code == 200:
         data = response.json()

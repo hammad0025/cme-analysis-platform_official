@@ -141,27 +141,33 @@ def handler(event, context):
             # Now trigger transcription on the converted file
             logger.info(f"Starting transcription for converted file: {output_uri}")
             
-            # Call the API handler to start transcription (better than importing)
-            import requests
-            api_url = os.environ.get('API_URL', 'https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod')
-            
+            # Invoke the API handler Lambda directly (IAM auth) rather than
+            # going through API Gateway, which requires a Cognito user token.
+            api_handler = os.environ.get('API_HANDLER_FUNCTION', 'cme-api-handler')
+
             try:
-                # Trigger processing which will start transcription
-                response = requests.post(
-                    f'{api_url}/cme/process',
-                    json={'session_id': session_id},
-                    headers={'Content-Type': 'application/json'},
-                    timeout=30
+                lambda_client = boto3.client('lambda')
+                invoke_response = lambda_client.invoke(
+                    FunctionName=api_handler,
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps({
+                        'httpMethod': 'POST',
+                        'path': '/cme/process',
+                        'body': json.dumps({'session_id': session_id}),
+                    }),
                 )
-                
-                if response.status_code == 200:
-                    transcription_result = response.json()
+                api_result = json.loads(invoke_response['Payload'].read())
+                status_code = api_result.get('statusCode')
+
+                if status_code == 200:
+                    transcription_result = json.loads(api_result.get('body') or '{}')
                     logger.info(f"Transcription triggered: {transcription_result}")
                 else:
-                    logger.error(f"Failed to trigger transcription: {response.status_code} - {response.text}")
-                    transcription_result = {'status': 'FAILED', 'error': f'API returned {response.status_code}'}
+                    body = api_result.get('body', '')
+                    logger.error(f"Failed to trigger transcription: {status_code} - {body}")
+                    transcription_result = {'status': 'FAILED', 'error': f'API handler returned {status_code}'}
             except Exception as api_error:
-                logger.error(f"Error calling API to start transcription: {str(api_error)}")
+                logger.error(f"Error invoking API handler to start transcription: {str(api_error)}")
                 transcription_result = {'status': 'FAILED', 'error': str(api_error)}
             
             if transcription_result.get('status') == 'FAILED':

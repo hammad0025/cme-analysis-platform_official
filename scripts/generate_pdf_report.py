@@ -10,13 +10,15 @@ import time
 import requests
 from datetime import datetime
 
+from cme_api_auth import auth_headers
+
 API_URL = 'https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod'
 SESSION_ID = 'cme_7285456d8748'
 
 def check_processing_status(session_id):
     """Check if processing is complete"""
     try:
-        response = requests.get(f"{API_URL}/cme/sessions/{session_id}")
+        response = requests.get(f"{API_URL}/cme/sessions/{session_id}", headers=auth_headers())
         if response.status_code == 200:
             data = response.json()
             status = data.get('status', 'unknown')

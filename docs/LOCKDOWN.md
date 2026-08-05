@@ -99,14 +99,14 @@ Consequences:
 - **Localhost dev mode (`REACT_APP_DEV_MODE=true`) can no longer hit the live API** —
   its fake `dev-mode-token` is rejected with 401. Use mock mode, or set
   `REACT_APP_DEV_MODE=false` and log in with real pool credentials.
-- Operator scripts in `scripts/` that call the API directly need a token, e.g.:
-
-  ```bash
-  aws cognito-idp initiate-auth --auth-flow USER_PASSWORD_AUTH \
-    --client-id 42e444v111efsa21b6b3v09svp \
-    --auth-parameters USERNAME=<user>,PASSWORD=<pass> \
-    --query 'AuthenticationResult.IdToken' --output text
-  ```
+- Operator scripts in `scripts/` authenticate via `scripts/cme_api_auth.py`.
+  Set `CME_API_USERNAME` / `CME_API_PASSWORD` (a `cme-analysis-users` pool
+  login) in the environment before running them. S3 presigned URLs are
+  still fetched without the bearer header — S3 rejects requests carrying
+  two auth mechanisms.
+- The MediaConvert completion Lambda no longer calls the public API; it
+  invokes the `cme-api-handler` Lambda directly (IAM), override with
+  `API_HANDLER_FUNCTION`.
 
 ## Frontend lockdown
 
