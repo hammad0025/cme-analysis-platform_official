@@ -1587,9 +1587,11 @@ Return ONLY a JSON array, no additional text or explanation:
 [{{"test_type": "range_of_motion", "declaration": "move your neck", "approximate_time": "early"}}, ...]"""
 
         response = bedrock_client.invoke_model(
-            modelId="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            modelId="us.anthropic.claude-sonnet-5",
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
+                # Thinking is on by default on Sonnet 5 and shares max_tokens.
+                "thinking": {"type": "disabled"},
                 "max_tokens": 4000,  # Increased for more tests
                 "messages": [{
                     "role": "user",

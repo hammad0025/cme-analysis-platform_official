@@ -857,9 +857,13 @@ Analyze the transcript and return JSON:
 Be thorough - catch ALL variations of language. Doctors are creative in how they describe things."""
 
         response = bedrock_client.invoke_model(
-            modelId='us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+            modelId='us.anthropic.claude-sonnet-5',
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
+                # Sonnet 5 enables adaptive thinking by default and thinking
+                # shares max_tokens with the reply; these are small structured
+                # judgements, so keep the whole budget for the JSON answer.
+                'thinking': {'type': 'disabled'},
                 'max_tokens': 800,
                 'messages': [{'role': 'user', 'content': prompt}]
             })
@@ -1095,9 +1099,13 @@ Analyze and return JSON:
 }}"""
 
         response = bedrock_client.invoke_model(
-            modelId='us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+            modelId='us.anthropic.claude-sonnet-5',
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
+                # Sonnet 5 enables adaptive thinking by default and thinking
+                # shares max_tokens with the reply; these are small structured
+                # judgements, so keep the whole budget for the JSON answer.
+                'thinking': {'type': 'disabled'},
                 'max_tokens': 600,
                 'messages': [{'role': 'user', 'content': prompt}]
             })
@@ -1194,9 +1202,13 @@ Was this test ACTUALLY PERFORMED? Return JSON:
 {{"performed": true/false, "confidence": 0.0-1.0, "reasoning": "why"}}"""
         
         response = bedrock_client.invoke_model(
-            modelId='us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+            modelId='us.anthropic.claude-sonnet-5',
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
+                # Sonnet 5 enables adaptive thinking by default and thinking
+                # shares max_tokens with the reply; these are small structured
+                # judgements, so keep the whole budget for the JSON answer.
+                'thinking': {'type': 'disabled'},
                 'max_tokens': 300,
                 'messages': [{'role': 'user', 'content': context}]
             })
