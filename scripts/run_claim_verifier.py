@@ -509,7 +509,10 @@ def main() -> None:
             run_claim_verifier_with_merged_observations,
         )
         from backend.lambda_functions.perplexity_client import PerplexityClient
-        from backend.lambda_functions.vision_client import default_model_for, make_vision_client
+        from backend.lambda_functions.vision_client import (
+            default_verifier_model_for,
+            make_vision_client,
+        )
 
         est = estimate_claim_verifier_cost_usd(
             len(claims), with_research=args.with_research
@@ -540,7 +543,10 @@ def main() -> None:
 
         provider = os.environ.get("CME_VISION_PROVIDER", "anthropic")
         client = make_vision_client(provider)
-        model_id = args.model or default_model_for(provider)
+        # Verdicts are the legal judgement step and run tens of times per case,
+        # so they default to the stronger Opus-tier model rather than the
+        # per-frame vision default. --model still overrides.
+        model_id = args.model or default_verifier_model_for(provider)
 
         print(f"Running claim verifier ({provider} / {model_id})…")
         verdicts = run_claim_verifier_with_merged_observations(

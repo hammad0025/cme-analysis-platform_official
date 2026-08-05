@@ -20,6 +20,9 @@ from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
 
 from .cme_analysis_utils import (
     DEFAULT_SONNET_MODEL,
+    DEFAULT_VERIFIER_MODEL,
+    OPUS_INPUT_PER_MTOK,
+    OPUS_OUTPUT_PER_MTOK,
     SONNET_INPUT_PER_MTOK,
     SONNET_OUTPUT_PER_MTOK,
     anthropic_call_with_retry,
@@ -42,6 +45,11 @@ PROVIDER_PRICING: Dict[Tuple[str, str], Dict[str, float]] = {
         "input_per_mtok": SONNET_INPUT_PER_MTOK,
         "output_per_mtok": SONNET_OUTPUT_PER_MTOK,
     },
+    ("anthropic", DEFAULT_VERIFIER_MODEL): {
+        "input_per_mtok": OPUS_INPUT_PER_MTOK,
+        "output_per_mtok": OPUS_OUTPUT_PER_MTOK,
+    },
+    # Older ids kept so cost reconciliation of past runs stays accurate.
     ("anthropic", "claude-sonnet-4-5-20250929"): {
         "input_per_mtok": SONNET_INPUT_PER_MTOK,
         "output_per_mtok": SONNET_OUTPUT_PER_MTOK,
@@ -643,6 +651,20 @@ def _resolve_api_key(provider: str, explicit: Optional[str]) -> str:
     raise VisionClientConfigError(
         f"Missing API key for provider {provider!r}. Set {env_list}."
     )
+
+
+def default_verifier_model_for(provider: str) -> str:
+    """Default model for the claim-verdict stage.
+
+    Separate from `default_model_for` (per-frame vision): verdicts run tens of
+    times per case rather than thousands, so the stronger Opus-tier model is
+    worth its higher per-call cost there.
+    """
+    p = (provider or "").strip().lower()
+    if p == "anthropic":
+        return DEFAULT_VERIFIER_MODEL
+    # Non-Anthropic providers have no separate verifier tier configured.
+    return default_model_for(provider)
 
 
 def default_model_for(provider: str) -> str:

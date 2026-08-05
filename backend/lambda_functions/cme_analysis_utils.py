@@ -15,7 +15,16 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 T = TypeVar("T")
 
-DEFAULT_SONNET_MODEL = "claude-sonnet-4-5-20250929"
+# Frame-by-frame vision runs thousands of calls per case, so the per-frame model
+# dominates cost. Sonnet 5 is the first Sonnet-tier model with high-resolution
+# vision (2576px vs 1568px long edge), which is what lets it resolve small
+# instruments — a goniometer in the examiner's hand — in a wide room shot.
+DEFAULT_SONNET_MODEL = "claude-sonnet-5"
+
+# Claim verdicts run tens of times per case, not thousands, and decide whether a
+# doctor's written claim is contradicted by the video. Quality matters far more
+# than per-call cost here, so this stage gets the stronger model.
+DEFAULT_VERIFIER_MODEL = "claude-opus-5"
 
 # Case metadata keys that must never enter deposition crosswalk / claim verifier.
 METADATA_CLAIM_IDS = frozenset(
@@ -82,6 +91,9 @@ PRESET_INTERVALS = {"standard": 5.0, "high": 1.0, "max": 0.5, "half_second": 0.5
 # Approximate list pricing (USD per million tokens) when usage-based billing is applied
 SONNET_INPUT_PER_MTOK = 3.0
 SONNET_OUTPUT_PER_MTOK = 15.0
+# Opus-tier pricing, used by the claim verifier stage.
+OPUS_INPUT_PER_MTOK = 5.0
+OPUS_OUTPUT_PER_MTOK = 25.0
 DEFAULT_HEURISTIC_COST_PER_VISION_CALL = 0.015
 
 
