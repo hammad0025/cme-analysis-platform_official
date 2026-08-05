@@ -159,6 +159,8 @@ If there is no evidence to cite, return "evidence": []. Do not invent evidence."
 
 def hunter_methodology_context_for_claim(claim_id: str, claim_text: str) -> str:
     """Inject Dr. Hunter proper-technique criteria and exam KB methodology for this claim."""
+    from .cme_ama_rom_criteria import ama_rom_context_for_claim
+    from .cme_defense_playbook import standard_of_care_context_for_claim
     from .cme_exam_knowledge_base import get_exam_by_name
     from .cme_hunter_methodology import TEST_PERFORMANCE_INDICATORS
 
@@ -200,10 +202,15 @@ def hunter_methodology_context_for_claim(claim_id: str, claim_text: str) -> str:
                 parts.append(
                     "Common deficiencies to flag if visible: " + "; ".join(str(e) for e in errors[:3])
                 )
-    if not parts:
+    lines = (
+        parts[:6]
+        + standard_of_care_context_for_claim(claim_id, claim_text)
+        + ama_rom_context_for_claim(claim_id, claim_text)
+    )
+    if not lines:
         return ""
     return "HUNTER / EXAM STANDARDS (use to judge technique; video evidence still controls verdict):\n" + "\n".join(
-        f"- {p}" for p in parts[:6]
+        f"- {p}" for p in lines
     )
 
 
