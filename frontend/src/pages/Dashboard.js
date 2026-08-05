@@ -1,445 +1,238 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import api from '../services/cmeApi';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import Button from '../components/Button';
+import StatusBadge from '../components/case/StatusBadge';
+import { caseDetailPath } from '../lib/caseRoutes';
+import { listCases, isMockMode } from '../services/casesService';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const [sessions, setSessions] = useState([]);
+  const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [stateFilter, setStateFilter] = useState('');
-  const [showModal, setShowModal] = useState(false);
-
-  useEffect(() => {
-    loadSessions();
-  }, []);
-
-  const loadSessions = async () => {
-    try {
-      setLoading(true);
-      const response = await api.get('/cme/sessions');
-      setSessions(response.data.sessions || []);
-    } catch (error) {
-      console.error('Failed to load sessions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const filteredSessions = sessions.filter(session => {
-    const matchesSearch = !searchQuery || 
-      session.patient_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      session.doctor_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesState = !stateFilter || session.state === stateFilter;
-    return matchesSearch && matchesState;
-  });
-
-  const stats = {
-    total: sessions.length,
-    completed: sessions.filter(s => s.status === 'completed').length,
-    processing: sessions.filter(s => s.status === 'processing').length,
-    pending: sessions.filter(s => ['created', 'recording_uploaded'].includes(s.status)).length,
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-900 bg-clip-text text-transparent">
-                CME Analysis Platform
-              </h1>
-              <p className="text-sm text-slate-600 mt-1">Medical Examination Analysis & Reporting</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-sm font-medium text-slate-900">{user?.email || user?.username}</p>
-                <p className="text-xs text-slate-500">{user?.given_name ? `${user.given_name} ${user.family_name || ''}` : 'User'}</p>
-              </div>
-              <button
-                onClick={() => setShowModal(true)}
-                className="group relative px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/40 hover:scale-105 active:scale-95 transition-all duration-200"
-              >
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  New Session
-                </span>
-              </button>
-              <button
-                onClick={logout}
-                className="px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-                title="Logout"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-8 py-8">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <StatCard 
-            label="Total Sessions" 
-            value={stats.total}
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            }
-            gradient="from-slate-500 to-slate-600"
-          />
-          <StatCard 
-            label="Completed" 
-            value={stats.completed}
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            gradient="from-emerald-500 to-green-600"
-          />
-          <StatCard 
-            label="Processing" 
-            value={stats.processing}
-            icon={
-              <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            }
-            gradient="from-blue-500 to-indigo-600"
-          />
-          <StatCard 
-            label="Pending" 
-            value={stats.pending}
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            gradient="from-amber-500 to-orange-600"
-          />
-        </div>
-
-        {/* Search and Filters */}
-        <div className="flex items-center gap-4 mb-6">
-          <div className="flex-1 relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search sessions..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full h-11 pl-10 pr-4 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
-            />
-          </div>
-          <select
-            value={stateFilter}
-            onChange={(e) => setStateFilter(e.target.value)}
-            className="h-11 px-4 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
-          >
-            <option value="">All States</option>
-            <option value="FL">Florida</option>
-            <option value="CA">California</option>
-            <option value="PA">Pennsylvania</option>
-            <option value="TX">Texas</option>
-          </select>
-          {(searchQuery || stateFilter) && (
-            <button
-              onClick={() => {
-                setSearchQuery('');
-                setStateFilter('');
-              }}
-              className="h-11 px-4 text-sm font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-sm"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        {/* Sessions Grid */}
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-          {loading ? (
-            <div className="p-16 text-center">
-              <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="mt-4 text-sm text-slate-500">Loading sessions...</p>
-            </div>
-          ) : filteredSessions.length === 0 ? (
-            <div className="p-16 text-center">
-              <div className="w-16 h-16 bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">No sessions found</h3>
-              <p className="text-sm text-slate-500 mb-6">Get started by creating your first CME session</p>
-              <button
-                onClick={() => setShowModal(true)}
-                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl hover:shadow-lg transition-shadow"
-              >
-                Create Session
-              </button>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-200">
-              {filteredSessions.map((session) => (
-                <div
-                  key={session.session_id}
-                  className="px-6 py-5 hover:bg-gradient-to-r hover:from-blue-50/50 hover:to-indigo-50/50 cursor-pointer transition-all group"
-                  onClick={() => navigate(`/sessions/${session.session_id}`)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-base font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
-                          {session.patient_name || 'Unnamed Patient'}
-                        </h3>
-                        <StatusBadge status={session.status} />
-                        <span className="text-xs font-medium px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg">
-                          {session.state}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-6 text-sm text-slate-600">
-                        <span className="flex items-center gap-2">
-                          <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                          </svg>
-                          {session.doctor_name || 'N/A'}
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          {session.exam_date || 'Not set'}
-                        </span>
-                        <span className="flex items-center gap-2">
-                          <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                          </svg>
-                          {session.mode || 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/sessions/${session.session_id}`);
-                      }}
-                      className="ml-4 px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
-                    >
-                      View Details →
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
-
-      {showModal && (
-        <CreateSessionModal
-          onClose={() => setShowModal(false)}
-          onSuccess={() => {
-            setShowModal(false);
-            loadSessions();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function StatCard({ label, value, icon, gradient }) {
-  return (
-    <div className="relative group">
-      <div className="absolute -inset-0.5 bg-gradient-to-r opacity-75 rounded-2xl blur transition group-hover:opacity-100" style={{ background: `linear-gradient(to right, var(--tw-gradient-stops))` }}></div>
-      <div className="relative bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
-        <div className="flex items-center justify-between mb-3">
-          <div className={`p-3 bg-gradient-to-br ${gradient} rounded-xl shadow-lg`}>
-            <div className="text-white">
-              {icon}
-            </div>
-          </div>
-        </div>
-        <div className="text-3xl font-bold text-slate-900 mb-1">{value}</div>
-        <div className="text-sm font-medium text-slate-600">{label}</div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const configs = {
-    created: { label: 'Created', classes: 'bg-blue-100 text-blue-700 ring-1 ring-blue-200' },
-    recording_uploaded: { label: 'Uploaded', classes: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200' },
-    processing: { label: 'Processing', classes: 'bg-purple-100 text-purple-700 ring-1 ring-purple-200 animate-pulse' },
-    completed: { label: 'Completed', classes: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200' },
-    error: { label: 'Error', classes: 'bg-red-100 text-red-700 ring-1 ring-red-200' },
-  };
-
-  const config = configs[status] || configs.created;
-
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg ${config.classes}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-      {config.label}
-    </span>
-  );
-}
-
-function CreateSessionModal({ onClose, onSuccess }) {
-  const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    patient_id: '',
-    patient_name: '',
-    doctor_name: '',
-    state: 'FL',
-    exam_date: new Date().toISOString().split('T')[0],
-    case_id: '',
-    attorney_name: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
+  const [source, setSource] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSubmitting(true);
-
-    try {
-      console.log('Creating session with data:', formData);
-      const response = await api.post('/cme/sessions', formData);
-      console.log('Session created:', response.data);
-      
-      if (response.data.session_id) {
-        navigate(`/sessions/${response.data.session_id}`);
-        onSuccess();
-      } else {
-        setError('Session created but no session_id returned');
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const { cases: list, source: src, error: err } = await listCases();
+        if (cancelled) return;
+        setCases(list);
+        setSource(src);
+        if (err) setError('Live API unavailable. Showing local cases only.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch (err) {
-      console.error('Failed to create session:', err);
-      console.error('Error response:', err.response);
-      const errorMsg = err.response?.data?.error || 
-                       err.response?.data?.message || 
-                       err.message ||
-                       'Failed to create session. Please check the console for details.';
-      setError(errorMsg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const stats = useMemo(() => ({
+    total: cases.length,
+    processing: cases.filter((c) => ['processing', 'uploading', 'recording_uploaded'].includes(c.status)).length,
+    completed: cases.filter((c) => c.status === 'completed').length,
+  }), [cases]);
+
+  const sourceLabel = {
+    mock: 'Local cases only',
+    'mock-fallback': 'Live API unreachable — local cases shown',
+    live: 'Synced with live API',
+  }[source] || '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
-      <div
-        className="relative bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <form onSubmit={handleSubmit}>
-          <div className="px-6 py-5 border-b border-slate-200">
-            <h2 className="text-xl font-bold text-slate-900">Create New Session</h2>
-            <p className="text-sm text-slate-600 mt-1">Enter the examination details below</p>
-          </div>
+    <>
+      <Hero stats={stats} isEmpty={!loading && cases.length === 0} />
 
-          <div className="px-6 py-6">
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { id: 'patient_id', label: 'Patient ID', required: true },
-                { id: 'patient_name', label: 'Patient Name', required: true },
-                { id: 'doctor_name', label: 'Examiner Name', required: true },
-                { id: 'exam_date', label: 'Exam Date', type: 'date', required: true },
-              ].map((field) => (
-                <div key={field.id}>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    {field.label} {field.required && <span className="text-red-500">*</span>}
-                  </label>
-                  <input
-                    type={field.type || 'text'}
-                    required={field.required}
-                    value={formData[field.id]}
-                    onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
-                    className="w-full h-10 px-3 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-              ))}
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-3"
+        >
+          <svg className="w-5 h-5 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          {error}
+        </motion.div>
+      )}
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  State <span className="text-red-500">*</span>
-                </label>
-                <select
-                  required
-                  value={formData.state}
-                  onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                  className="w-full h-10 px-3 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="FL">Florida</option>
-                  <option value="CA">California</option>
-                  <option value="PA">Pennsylvania</option>
-                  <option value="TX">Texas</option>
-                </select>
-              </div>
+      <div className="mt-10 flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Your cases</h2>
+          <p className="text-sm text-slate-500 mt-1">{sourceLabel}</p>
+        </div>
+        <Link to="/cases/new">
+          <Button variant="primary" size="md">
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            New case
+          </Button>
+        </Link>
+      </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Case ID</label>
-                <input
-                  type="text"
-                  value={formData.case_id}
-                  onChange={(e) => setFormData({ ...formData, case_id: e.target.value })}
-                  className="w-full h-10 px-3 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+      {loading ? (
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-44 rounded-2xl shimmer" />
+          ))}
+        </div>
+      ) : cases.length === 0 ? (
+        <EmptyState onNew={() => navigate('/cases/new')} source={source} />
+      ) : (
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {cases.map((c, i) => (
+            <CaseCard key={`${c.case_id}-${c.is_mock ? 'm' : 'l'}`} caseData={c} index={i} />
+          ))}
+        </div>
+      )}
 
-              <div className="col-span-2">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Attorney Name</label>
-                <input
-                  type="text"
-                  value={formData.attorney_name}
-                  onChange={(e) => setFormData({ ...formData, attorney_name: e.target.value })}
-                  className="w-full h-10 px-3 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+      {isMockMode() && (
+        <p className="mt-8 text-center text-xs text-slate-400">
+          Mock mode — cases persist in this browser until reset from the sidebar or site data is cleared.
+        </p>
+      )}
+    </>
+  );
+}
+
+function Hero({ stats, isEmpty }) {
+  return (
+    <section className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 shadow-2xl">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-indigo-500/30 blur-3xl animate-blob" />
+        <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-purple-600/25 blur-3xl animate-blob animation-delay-2000" />
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)',
+            backgroundSize: '24px 24px',
+          }}
+        />
+      </div>
+      <div className="relative p-8 sm:p-10 lg:p-12">
+        <div className="grid lg:grid-cols-5 gap-8 items-center">
+          <div className="lg:col-span-3">
+            <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-indigo-300 mb-4">
+              <span className="w-8 h-px bg-indigo-400/50" />
+              CME Analysis Platform
             </div>
-
-            {error && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-800">
-                {error}
+            {isEmpty ? (
+              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 border border-emerald-400/30 px-3 py-1 text-xs font-semibold text-emerald-200 mb-4">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                Fresh start — no cases on file
               </div>
-            )}
+            ) : null}
+            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight leading-tight">
+              {isEmpty ? 'Your workspace is clear.' : 'Defense-side CME scrutiny, structured for trial.'}
+            </h1>
+            <p className="mt-4 text-indigo-100/90 text-sm sm:text-base max-w-2xl leading-relaxed">
+              {isEmpty
+                ? 'Live sessions and local demo cases have been cleared. Start with a new case upload or open the offline sample to preview deliverables.'
+                : 'Upload examination videos and the insurance doctor\'s written report. The platform compares what the doctor documented to what the video shows — with deposition timestamps you can cite in cross-examination.'}
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link to="/cases/new">
+                <Button variant="primary" size="lg">Start a new case</Button>
+              </Link>
+              <Link to="/cases/sample">
+                <Button variant="secondary" size="lg">View sample case</Button>
+              </Link>
+            </div>
           </div>
+          <div className="lg:col-span-2 grid grid-cols-3 gap-3">
+            <StatTile label="Total cases" value={stats.total} />
+            <StatTile label="In progress" value={stats.processing} accent="amber" />
+            <StatTile label="Completed" value={stats.completed} accent="emerald" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
-          <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3 rounded-b-2xl">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="h-10 px-5 text-sm font-medium text-slate-700 hover:bg-white border border-slate-300 rounded-lg transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="h-10 px-5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:shadow-lg transition-shadow disabled:opacity-50"
-            >
-              {submitting ? 'Creating...' : 'Create Session'}
-            </button>
-          </div>
-        </form>
+function StatTile({ label, value, accent }) {
+  const accentCls = { amber: 'text-amber-300', emerald: 'text-emerald-300' }[accent] || 'text-indigo-200';
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-4 backdrop-blur-sm hover:bg-white/10 transition-colors">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-white/50">{label}</div>
+      <div className={`text-3xl font-bold mt-1 tabular-nums ${accentCls}`}>{value}</div>
+    </div>
+  );
+}
+
+function CaseCard({ caseData, index }) {
+  const navigate = useNavigate();
+  const target = caseDetailPath(caseData);
+  const plaintiff = caseData.plaintiff_name || caseData.patient_name || 'Unnamed plaintiff';
+  const examiner = caseData.examiner_name || caseData.doctor_name || 'Examiner pending';
+
+  return (
+    <motion.button
+      type="button"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05, duration: 0.25 }}
+      onClick={() => navigate(target)}
+      className="group text-left w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-lg hover:border-indigo-200 hover:-translate-y-0.5 transition-all duration-200"
+    >
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-sm font-bold shadow-sm">
+          {plaintiff.charAt(0).toUpperCase()}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <StatusBadge status={caseData.status} />
+          {caseData.is_mock && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+              local
+            </span>
+          )}
+        </div>
+      </div>
+
+      <h3 className="text-base font-bold text-slate-900 truncate group-hover:text-indigo-700 transition-colors">
+        {plaintiff}
+      </h3>
+      <p className="text-sm text-slate-600 mt-1 truncate">{examiner}</p>
+
+      <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+        <span>{caseData.exam_date ? `Exam ${caseData.exam_date}` : 'Date pending'}</span>
+        <span className="font-mono text-[10px] text-slate-400 truncate max-w-[8rem]">{caseData.case_id}</span>
+      </div>
+
+      <div className="mt-3 flex items-center gap-1 text-xs font-medium text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity">
+        Open case
+        <svg className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
+    </motion.button>
+  );
+}
+
+function EmptyState({ onNew, source }) {
+  const liveEmpty = source === 'live' || source === 'mock-fallback';
+  return (
+    <div className="mt-6 rounded-2xl border-2 border-dashed border-emerald-200/80 bg-gradient-to-b from-white to-emerald-50/30 p-12 sm:p-16 text-center">
+      <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+        <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+      <h3 className="mt-6 text-lg font-bold text-slate-900">Fresh start</h3>
+      <p className="mt-2 text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+        {liveEmpty
+          ? 'No sessions in the live API — the dashboard is empty. Create your first case or preview the offline sample report.'
+          : 'No local mock cases saved. Create your first case or preview the offline sample report.'}
+      </p>
+      <div className="mt-8 flex items-center justify-center gap-3 flex-wrap">
+        <Button variant="primary" size="md" onClick={onNew}>Start a new case</Button>
+        <Link to="/cases/sample">
+          <Button variant="secondary" size="md">View sample case</Button>
+        </Link>
       </div>
     </div>
   );

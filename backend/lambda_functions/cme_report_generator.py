@@ -6,6 +6,7 @@ Implements Step 8 from the technical documentation
 import json
 import boto3
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from decimal import Decimal
@@ -14,6 +15,32 @@ import os
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Administrative / transcription noise that must never surface as a report
+# finding (kept local: this Lambda is deployed standalone, without the
+# cme_egregious_ranking package). Mirrors cme_egregious_ranking._BANNED_NOISE_RE.
+_REPORT_NOISE_RE = re.compile(
+    r"\b(?:"
+    r"name\s+(?:was\s+)?(?:recorded|spelled|misspelled|mispronounced|stated)"
+    r"|misspell\w*|spelling|mispronunc\w*|pronunciation"
+    r"|transcription\s+(?:error|artifact|issue|quality)"
+    r"|transcript\s+(?:error|artifact)"
+    r"|audio\s+quality|recording\s+quality|inaudible"
+    r"|recorded\s+improperly"
+    r"|paperwork|scheduling|check[- ]?in|consent\s+form"
+    r"|small\s+talk|greeting"
+    r")\b",
+    re.I,
+)
+
+
+def _is_noise_flag(flag: Dict[str, Any]) -> bool:
+    """True when a demeanor flag is administrative/transcription noise."""
+    text = " ".join(
+        str(flag.get(k) or "")
+        for k in ("flag_type", "description", "transcript_excerpt")
+    )
+    return bool(_REPORT_NOISE_RE.search(text))
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
@@ -196,6 +223,22 @@ HTML_REPORT_TEMPLATE = """<!DOCTYPE html>
             background: linear-gradient(90deg, #28a745, #20c997);
             transition: width 0.3s ease;
         }}
+        .motion-performed {{
+            color: #28a745;
+            font-weight: bold;
+        }}
+        .motion-brief {{
+            color: #ffc107;
+            font-weight: bold;
+        }}
+        .motion-not_observed {{
+            color: #dc3545;
+            font-weight: bold;
+        }}
+        .motion-pending {{
+            color: #6c757d;
+            font-style: italic;
+        }}
         .footer {{
             background: #f8f9fa;
             padding: 20px;
@@ -256,6 +299,20 @@ class CMEReportGenerator:
                 report_content = self._generate_html_report(report_data, include_video_links)
                 content_type = 'text/html'
                 file_extension = 'html'
+            elif format == 'pdf':
+                # Generate HTML first, then convert to PDF
+                html_content = self._generate_html_report(report_data, include_video_links)
+                try:
+                    from weasyprint import HTML
+                    pdf_content = HTML(string=html_content).write_pdf()
+                    report_content = pdf_content
+                    content_type = 'application/pdf'
+                    file_extension = 'pdf'
+                except ImportError:
+                    logger.warning("WeasyPrint not available, falling back to HTML")
+                    report_content = html_content
+                    content_type = 'text/html'
+                    file_extension = 'html'
             elif format == 'json':
                 report_content = json.dumps(report_data, indent=2, default=str)
                 content_type = 'application/json'
@@ -549,18 +606,28 @@ class CMEReportGenerator:
         session = data['session']
         declared_steps = data['declared_steps']
         step_actions = data['step_actions']
-        demeanor_flags = data['demeanor_flags']
+        # Hard noise gate: drop administrative/transcription artifacts and
+        # low-severity bedside-manner complaints — they are not findings.
+        demeanor_flags = [
+            f for f in data['demeanor_flags']
+            if f.get('severity') in ('high', 'medium') and not _is_noise_flag(f)
+        ]
         doctor_commands = data.get('doctor_commands', [])
         patient_confusion = data.get('patient_confusion', [])
         patient_distress = data.get('patient_distress', [])
         inattentive_tests = data.get('inattentive_tests', [])
         
-        # Calculate statistics
-        total_tests = len(declared_steps)
+        # Calculate statistics - DR. HUNTER'S KEY METRIC
+        total_tests_mentioned = len(declared_steps)  # All test declarations/mentions
         tests_performed = sum(1 for step in declared_steps 
                              if step_actions.get(step['declared_step_id'], {}).get('motion_present') == 'performed')
         tests_not_performed = sum(1 for step in declared_steps 
                                  if step_actions.get(step['declared_step_id'], {}).get('motion_present') == 'not_observed')
+        tests_brief = sum(1 for step in declared_steps 
+                         if step_actions.get(step['declared_step_id'], {}).get('motion_present') == 'brief')
+        
+        # Legacy variable for backward compatibility
+        total_tests = total_tests_mentioned
         high_severity_flags = sum(1 for flag in demeanor_flags if flag.get('severity') == 'high')
         
         # NEW STATISTICS
@@ -615,17 +682,24 @@ class CMEReportGenerator:
         <div class="section">
             <h2>📊 Executive Summary</h2>
             <div class="summary-stats">
-                <div class="stat-box">
-                    <div class="stat-number">{total_tests}</div>
-                    <div class="stat-label">Tests Declared</div>
+                <div class="stat-box" style="background: #fff3cd; border: 2px solid #ffc107;">
+                    <div class="stat-number">{total_tests_mentioned}</div>
+                    <div class="stat-label">Tests MENTIONED</div>
+                    <div style="font-size: 0.8em; color: #856404; margin-top: 5px;">(Doctor declared/intended)</div>
                 </div>
-                <div class="stat-box">
+                <div class="stat-box" style="background: #d1ecf1; border: 2px solid #17a2b8;">
                     <div class="stat-number">{tests_performed}</div>
-                    <div class="stat-label">Tests Performed</div>
+                    <div class="stat-label">Tests PERFORMED</div>
+                    <div style="font-size: 0.8em; color: #0c5460; margin-top: 5px;">(Video validated)</div>
+                </div>
+                <div class="stat-box" style="background: #f8d7da; border: 2px solid #dc3545;">
+                    <div class="stat-number">{tests_not_performed}</div>
+                    <div class="stat-label">Tests NOT Performed</div>
+                    <div style="font-size: 0.8em; color: #721c24; margin-top: 5px;">(Mentioned but not observed)</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-number">{tests_not_performed}</div>
-                    <div class="stat-label">Tests Not Observed</div>
+                    <div class="stat-number">{tests_brief}</div>
+                    <div class="stat-label">Tests Brief/Partial</div>
                 </div>
                 <div class="stat-box">
                     <div class="stat-number">{len(demeanor_flags)}</div>
@@ -654,6 +728,65 @@ class CMEReportGenerator:
             </div>
         </div>
         
+        """
+        
+        # CROSS-EXAMINATION FINDINGS: numbered, most damning first. Tests the
+        # doctor declared but never performed lead; brief/partial follow.
+        crossexam_candidates = []
+        for step in declared_steps:
+            action = step_actions.get(step['declared_step_id'], {})
+            motion = action.get('motion_present')
+            if motion not in ('not_observed', 'brief'):
+                continue
+            transcript = str(step.get('transcript_text') or '').strip()
+            if _REPORT_NOISE_RE.search(transcript):
+                continue
+            crossexam_candidates.append({
+                'label': str(step.get('label') or 'unknown').replace('_', ' ').title(),
+                'timestamp': float(step.get('timestamp', 0)),
+                'transcript': transcript,
+                'motion': motion,
+                'confidence': float(step.get('confidence', 0)),
+            })
+        # Never performed at all outranks performed briefly/partially.
+        crossexam_candidates.sort(
+            key=lambda c: (0 if c['motion'] == 'not_observed' else 1, -c['confidence'])
+        )
+        if crossexam_candidates:
+            content += """
+        <div class="section" style="border-left: 6px solid #dc3545; background: #fff5f5;">
+            <h2>⚖️ CROSS-EXAMINATION FINDINGS</h2>
+            <p>Ranked most-damning first. Each finding pits the examiner's own declared test
+            against the timestamped video record.</p>
+        """
+            for i, c in enumerate(crossexam_candidates[:10], start=1):
+                minutes = int(c['timestamp'] // 60)
+                seconds = int(c['timestamp'] % 60)
+                time_str = f"{minutes}:{seconds:02d}"
+                if c['motion'] == 'not_observed':
+                    fact = (
+                        f"The video does not show {c['label']} being performed. "
+                        f"The declaration appears at {time_str} of the video with no "
+                        f"corresponding examination."
+                    )
+                else:
+                    fact = (
+                        f"What was performed at {time_str} of the video was brief/partial "
+                        f"and does not qualify as a complete {c['label']}."
+                    )
+                quote = c['transcript'][:200]
+                quote_html = (
+                    f"<p><em>Declared on video:</em> &ldquo;{quote}&rdquo;</p>" if quote else ""
+                )
+                content += f"""
+            <div style="background: white; border-left: 4px solid #dc3545; padding: 12px 16px; margin: 12px 0; border-radius: 4px;">
+                <h3 style="margin: 0 0 8px 0; color: #721c24;">CROSS EXAMINATION #{i}: Examiner declared {c['label']} during the examination.</h3>
+                {quote_html}
+                <p><strong>FACT:</strong> {fact} See {time_str} of the video.</p>
+            </div>
+            """
+            content += """
+        </div>
         """
         
         # Add inattentive tests section if any exist
@@ -719,6 +852,23 @@ class CMEReportGenerator:
             action = step_actions.get(step_id, {})
             motion_present = action.get('motion_present', 'unknown')
             
+            # Better handling of missing video analysis
+            if motion_present == 'unknown':
+                motion_display = "⏳ Video Analysis Pending"
+                motion_class = "pending"
+            elif motion_present == 'performed':
+                motion_display = "✅ Performed"
+                motion_class = "performed"
+            elif motion_present == 'brief':
+                motion_display = "⚠️ Brief/Partial"
+                motion_class = "brief"
+            elif motion_present == 'not_observed':
+                motion_display = "❌ Not Observed"
+                motion_class = "not_observed"
+            else:
+                motion_display = motion_present.replace('_', ' ').title()
+                motion_class = motion_present
+            
             is_discrepancy = motion_present in ['not_observed', 'brief']
             discrepancy_class = 'discrepancy' if is_discrepancy else ''
             
@@ -732,7 +882,7 @@ class CMEReportGenerator:
                     <div class="timeline-time">⏰ {time_str}</div>
                     <span class="timeline-label">{label.replace('_', ' ').title()}</span>
                     <p><strong>Examiner stated:</strong> "{transcript[:200]}{'...' if len(transcript) > 200 else ''}"</p>
-                    <p><strong>Observed Action:</strong> {motion_present.replace('_', ' ').title()}</p>
+                    <p><strong>Observed Action:</strong> <span class="motion-{motion_class}">{motion_display}</span></p>
                     <div class="confidence-bar">
                         <div class="confidence-fill" style="width: {confidence * 100}%"></div>
                     </div>
@@ -1000,6 +1150,97 @@ class CMEReportGenerator:
         except Exception as e:
             logger.error(f"Error creating report bundle: {str(e)}")
             return {'error': str(e)}
+
+
+def _update_session_after_report(session_id: str, *, success: bool, report_key: str = '', error: str = '') -> None:
+    """Reflect report generation outcome on the session record so the UI
+    never shows 'completed' without a report or 'processing' forever."""
+    import time as _time
+    try:
+        sessions_table = dynamodb.Table(os.environ.get('CME_SESSIONS_TABLE', 'cme-sessions'))
+        if success:
+            sessions_table.update_item(
+                Key={'session_id': session_id},
+                UpdateExpression=(
+                    'SET #status = :status, processing_stage = :stage, '
+                    'report_key = :key, updated_at = :updated'
+                ),
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': 'completed',
+                    ':stage': 'report_generated',
+                    ':key': report_key,
+                    ':updated': int(_time.time()),
+                },
+            )
+        else:
+            sessions_table.update_item(
+                Key={'session_id': session_id},
+                UpdateExpression=(
+                    'SET #status = :status, processing_stage = :stage, '
+                    'last_error = :err, updated_at = :updated'
+                ),
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': 'error',
+                    ':stage': 'report_failed',
+                    ':err': (error or 'report generation failed')[:500],
+                    ':updated': int(_time.time()),
+                },
+            )
+    except Exception as ddb_error:
+        logger.error(f"Failed to update session after report generation: {ddb_error}")
+
+
+def generate_report(event, context):
+    """
+    Lambda handler for Step Functions invocation
+    Generates CME analysis report
+    """
+    session_id = None
+    try:
+        logger.info(f"Report Generator invoked: {json.dumps(event)}")
+        
+        session_id = event.get('session_id')
+        format = event.get('format', 'html')
+        
+        if not session_id:
+            return {
+                'statusCode': 400,
+                'error': 'session_id is required'
+            }
+        
+        s3_bucket = os.environ.get('S3_BUCKET', 'cme-analysis-recordings-388846700527')
+        generator = CMEReportGenerator(s3_bucket)
+        
+        # Generate report
+        result = generator.generate_report(
+            session_id=session_id,
+            include_video_links=True,
+            format=format
+        )
+        
+        if 'error' in result:
+            # Mark the session failed and raise so Step Functions' Catch
+            # runs instead of silently completing a session with no report.
+            _update_session_after_report(session_id, success=False, error=str(result['error']))
+            raise RuntimeError(f"Report generation failed: {result['error']}")
+        
+        _update_session_after_report(
+            session_id, success=True, report_key=str(result.get('report_key') or '')
+        )
+        return {
+            'statusCode': 200,
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in report generator handler: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        if session_id:
+            _update_session_after_report(session_id, success=False, error=str(e))
+        raise
 
 
 # Import os for environment variables

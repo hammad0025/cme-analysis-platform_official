@@ -23,6 +23,33 @@ class TranscriptionInProgressError(Exception):
     pass
 
 
+class TranscriptionFailedError(Exception):
+    """Raised when the Transcribe job failed; Step Functions' Catch marks the session failed."""
+    pass
+
+
+def normalize_s3_uri(uri: str) -> str:
+    """Convert an https S3 URL (path-style or virtual-hosted) to s3://bucket/key."""
+    from urllib.parse import urlparse, unquote
+    if not uri or not uri.startswith(('http://', 'https://')):
+        return uri
+    parsed = urlparse(uri)
+    host = (parsed.netloc or '').lower()
+    path = unquote(parsed.path or '').lstrip('/')
+    if not host.endswith('.amazonaws.com'):
+        return uri
+    if host == 's3.amazonaws.com' or host.startswith('s3.') or host.startswith('s3-'):
+        parts = path.split('/', 1)
+        if len(parts) == 2 and parts[0] and parts[1]:
+            return f"s3://{parts[0]}/{parts[1]}"
+        return uri
+    if '.s3.' in host or '.s3-' in host:
+        bucket = host.split('.s3.', 1)[0] if '.s3.' in host else host.split('.s3-', 1)[0]
+        if bucket and path:
+            return f"s3://{bucket}/{path}"
+    return uri
+
+
 def handler(event, context):
     """
     Check transcription job status and return results when complete
@@ -78,14 +105,17 @@ def handler(event, context):
             
             # Download and parse transcript
             transcript_data = download_transcript(transcript_uri)
-            
+
+            # Store a stable s3:// URI (Transcribe returns a full https URL)
+            stored_uri = normalize_s3_uri(transcript_uri)
+
             # Update session with transcript URI
             sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
             sessions_table.update_item(
                 Key={'session_id': session_id},
                 UpdateExpression='SET transcript_uri = :uri, processing_stage = :stage, updated_at = :updated',
                 ExpressionAttributeValues={
-                    ':uri': transcript_uri,
+                    ':uri': stored_uri,
                     ':stage': 'nlp_analysis',
                     ':updated': int(time.time())
                 }
@@ -115,17 +145,13 @@ def handler(event, context):
                 }
             )
             
-            return {
-                'statusCode': 500,
-                'error': 'Transcription failed',
-                'message': error_message
-            }
+            # Raise (instead of returning a 500 payload) so the state
+            # machine's Catch marks the session failed rather than feeding
+            # a transcript-less payload to the NLP step.
+            raise TranscriptionFailedError(f'Transcription failed: {error_message}')
         
         else:
-            return {
-                'statusCode': 500,
-                'error': f'Unknown transcription status: {status}'
-            }
+            raise TranscriptionFailedError(f'Unknown transcription status: {status}')
     
     except TranscriptionInProgressError as e:
         # Re-raise for Step Function retry

@@ -3,23 +3,27 @@
   "version": "1.0.0",
   "description": "CME Analysis Platform - React Frontend",
   "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.1",
-    "react-scripts": "5.0.1",
-    "axios": "^1.6.5",
-    "tailwindcss": "^3.4.1",
-    "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.33",
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.1.1",
-    "react-player": "^2.14.1",
+    "amazon-cognito-identity-js": "^6.3.7",
+    "autoprefixer": "^10.4.16",
+    "axios": "^1.6.5",
     "date-fns": "^3.2.0",
-    "recharts": "^2.10.4",
-    "react-toastify": "^10.0.4",
     "framer-motion": "^10.18.0",
-    "amazon-cognito-identity-js": "^6.3.7"
+    "pdfjs-dist": "^3.11.174",
+    "postcss": "^8.4.33",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-player": "^2.14.1",
+    "react-router-dom": "^6.21.1",
+    "react-scripts": "5.0.1",
+    "react-toastify": "^10.0.4",
+    "recharts": "^2.10.4",
+    "tailwindcss": "^3.4.1"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -49,7 +53,3 @@
     "@types/react-dom": "^18.2.18"
   }
 }
-
-
-
-

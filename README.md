@@ -165,6 +165,23 @@ cdk bootstrap
 cdk deploy
 ```
 
+### Local full analysis (CLI)
+
+The canonical **local** runner is [`analyze_cme_full.py`](analyze_cme_full.py) at the repository root. It extracts frames once, runs technique and behavior vision passes, optionally ingests a transcript, and writes results under your output directory (including `cost_actual.json` for estimated vs actual spend).
+
+**Prerequisites:** `ffmpeg`, `ffprobe`, Python 3.12+, `ANTHROPIC_API_KEY`, and the Python deps that include `anthropic` (see `backend/lambda_functions/requirements.txt`).
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+python analyze_cme_full.py path/to/exam.mp4 --plaintiff "Name" --examiner "Dr. Name" --preset standard
+```
+
+- Preflight cost: `python scripts/estimate_cme_cost.py path/to/exam.mp4 --preset high`
+- Golden-set eval: `python scripts/eval_cme_vision.py --manifest tests/fixtures/golden_set/manifest.json`
+- One-off research scripts: use [`scripts/experimental/`](scripts/experimental/)
+
+Keep large per-case artifacts in **`cme_projects/`** (gitignored), not in version control.
+
 ### 📘 API Endpoints
 
 **Sessions:**

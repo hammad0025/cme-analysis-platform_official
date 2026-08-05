@@ -3,6 +3,15 @@ import { CognitoUserPool, CognitoUser, AuthenticationDetails } from 'amazon-cogn
 
 const AuthContext = createContext();
 
+const DEV_MODE = process.env.REACT_APP_DEV_MODE === 'true';
+
+const DEV_USER = {
+  email: 'demo@cme.local',
+  given_name: 'Demo',
+  family_name: 'Reviewer',
+  username: 'demo',
+};
+
 const userPool = new CognitoUserPool({
   UserPoolId: process.env.REACT_APP_USER_POOL_ID || 'us-east-1_t8m33Ihhq',
   ClientId: process.env.REACT_APP_USER_POOL_WEB_CLIENT_ID || '42e444v111efsa21b6b3v09svp',
@@ -13,7 +22,13 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (DEV_MODE) {
+      setUser(DEV_USER);
+      setLoading(false);
+      return;
+    }
     checkUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkUser = () => {
@@ -51,6 +66,11 @@ export function AuthProvider({ children }) {
   };
 
   const login = (username, password) => {
+    if (DEV_MODE) {
+      setUser(DEV_USER);
+      localStorage.setItem('auth_token', 'dev-mode-token');
+      return Promise.resolve({ devMode: true });
+    }
     return new Promise((resolve, reject) => {
       const cognitoUser = new CognitoUser({
         Username: username,
@@ -115,9 +135,11 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    const cognitoUser = userPool.getCurrentUser();
-    if (cognitoUser) {
-      cognitoUser.signOut();
+    if (!DEV_MODE) {
+      const cognitoUser = userPool.getCurrentUser();
+      if (cognitoUser) {
+        cognitoUser.signOut();
+      }
     }
     localStorage.removeItem('auth_token');
     setUser(null);
@@ -155,6 +177,7 @@ export function AuthProvider({ children }) {
     logout,
     changePassword,
     isAuthenticated: !!user,
+    devMode: DEV_MODE,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

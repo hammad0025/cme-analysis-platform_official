@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Comprehensive CME Video Analysis - Tracy Green</title>
+    <style>
+        body { font-family: Georgia, serif; max-width: 1000px; margin: 0 auto; padding: 30px; line-height: 1.6; color: #333; }
+        h1 { color: #1a365d; border-bottom: 3px solid #c53030; padding-bottom: 10px; }
+        h2 { color: #2c5282; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+        h3 { color: #2d3748; }
+        .header-table { width: auto; margin-bottom: 25px; }
+        .header-table td { padding: 5px 15px 5px 0; }
+        .critical { background: #c53030; color: white; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        .critical h2 { color: white; border: none; margin-top: 0; }
+        .critical ol { margin: 0; padding-left: 20px; }
+        .critical li { margin: 10px 0; }
+        .finding { background: #fed7d7; border-left: 5px solid #c53030; padding: 15px; margin: 15px 0; }
+        .warning { background: #feebc8; border-left: 5px solid #dd6b20; padding: 15px; margin: 15px 0; }
+        .info { background: #e2e8f0; padding: 15px; margin: 15px 0; border-radius: 4px; }
+        .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+        .claim-box { background: #e2e8f0; padding: 15px; border-radius: 8px; }
+        .reality-box { background: #fed7d7; padding: 15px; border-radius: 8px; }
+        .claim-box h4, .reality-box h4 { margin-top: 0; color: #2d3748; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+        th { background: #2c5282; color: white; }
+        tr:nth-child(even) { background: #f7fafc; }
+        .timestamp { font-family: monospace; background: #edf2f7; padding: 2px 6px; border-radius: 3px; color: #2d3748; }
+        .not-done { color: #c53030; font-weight: bold; }
+        .done { color: #2f855a; }
+        .summary-box { background: #1a365d; color: white; padding: 25px; border-radius: 8px; margin: 25px 0; }
+        .summary-box h2 { color: white; border: none; margin-top: 0; }
+        .ref { background: #ebf8ff; border-left: 4px solid #3182ce; padding: 12px; margin: 10px 0; font-size: 0.9em; }
+        .behavior-section { background: #f7fafc; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e2e8f0; }
+        .progress-bar { height: 24px; background: #e2e8f0; border-radius: 12px; overflow: hidden; margin: 10px 0; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #48bb78, #38a169); display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; color: white; font-weight: bold; }
+        .progress-fill.warning { background: linear-gradient(90deg, #ed8936, #dd6b20); }
+        .test-log { font-family: monospace; background: #1a202c; color: #e2e8f0; padding: 15px; border-radius: 8px; max-height: 350px; overflow-y: auto; font-size: 0.85em; }
+        .test-log .ts { color: #68d391; }
+        .test-log .body-part { color: #63b3ed; }
+        .test-log .test { color: #fbd38d; }
+        @media print {
+            .critical, .summary-box, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            body { padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>COMPREHENSIVE CME VIDEO ANALYSIS</h1>
+    
+    <table class="header-table">
+        <tr><td><strong>Patient:</strong></td><td>Tracy Green</td></tr>
+        <tr><td><strong>DOB:</strong></td><td>March 28, 1973</td></tr>
+        <tr><td><strong>Examiner:</strong></td><td>Dr. Stephen J. Jacobs, MD</td></tr>
+        <tr><td><strong>Date of CME:</strong></td><td>April 20, 2023</td></tr>
+        <tr><td><strong>Date of Injury:</strong></td><td>June 16, 2017</td></tr>
+        <tr><td><strong>Video Length:</strong></td><td>19:09</td></tr>
+        <tr><td><strong>Frames Analyzed:</strong></td><td>230/230 (100%)</td></tr>
+    </table>
+
+    <div class="critical">
+        <h2>TOP FINDINGS</h2>
+        <ol>
+            <li><strong>No Goniometer Used</strong> - Report claims specific ROM measurements (30, 40, 45 degrees etc.) but video shows NO goniometer or inclinometer used in any of 15 ROM frames</li>
+            <li><strong>Doctor Attention Only 72%</strong> - Doctor observed NOT looking at patient during 19 examination frames</li>
+            <li><strong>Rushed Examination</strong> - Physical exam ~18 minutes (standard for complex patient: 30-45 minutes)</li>
+            <li><strong>Patient Distress</strong> - 3 instances of patient distress documented during examination</li>
+            <li><strong>ROM Testing Without Measurement</strong> - 15 ROM tests performed but no objective measurements via instrumentation</li>
+            <li><strong>Incomplete Neurological Exam</strong> - Only 2 strength tests, 3 reflex tests observed; lower extremities not tested</li>
+        </ol>
+    </div>
+
+    <h2>EXAMINATION TIMELINE OVERVIEW</h2>
+    <table>
+        <tr><th>Metric</th><th>Value</th><th>Standard</th></tr>
+        <tr>
+            <td>Physical Exam Window</td>
+            <td><span class="timestamp">00:15</span> - <span class="timestamp">18:50</span></td>
+            <td>N/A</td>
+        </tr>
+        <tr>
+            <td>Total Hands-On Duration</td>
+            <td>~18 minutes 35 seconds</td>
+            <td class="not-done">30-45 min for complex patient</td>
+        </tr>
+        <tr>
+            <td>Goniometer/Inclinometer Used</td>
+            <td class="not-done">NO (0 frames)</td>
+            <td>Required for ROM measurements</td>
+        </tr>
+        <tr>
+            <td>Doctor Eye Contact</td>
+            <td>72%</td>
+            <td>>80% expected</td>
+        </tr>
+    </table>
+
+    <h2>DOCTOR BEHAVIOR ANALYSIS</h2>
+    
+    <div class="behavior-section">
+        <h3>Attention to Patient During Examination</h3>
+        <p>Doctor observed looking at patient:</p>
+        <div class="progress-bar">
+            <div class="progress-fill warning" style="width: 72%;">72%</div>
+        </div>
+        
+        <h3>Instances When Doctor NOT Observing Patient During Physical Exam</h3>
+        <table>
+            <tr><th>Timestamp</th><th>Activity</th><th>Concern</th></tr>
+            <tr>
+                <td><span class="timestamp">10:50</span></td>
+                <td>Doctor in purple scrubs performing palpation examinatio...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">11:40</span></td>
+                <td>Doctor in purple shirt performing palpation examination...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">11:50</span></td>
+                <td>Doctor in purple scrubs palpating patient's right knee ...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">11:55</span></td>
+                <td>Examiner in blue jacket performing palpation examinatio...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">12:00</span></td>
+                <td>Patient in blue shirt performing elbow range of motion ...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">12:25</span></td>
+                <td>Doctor in purple top performing palpation examination o...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">12:30</span></td>
+                <td>Examiner in purple shirt performing palpation examinati...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">12:45</span></td>
+                <td>Doctor in purple scrubs performing palpation examinatio...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">12:50</span></td>
+                <td>Doctor in purple scrubs examining patient's left elbow/...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">13:30</span></td>
+                <td>Doctor in purple scrubs palpating patient's right elbow...</td>
+                <td class="not-done">Not observing patient</td>
+            </tr>
+            <tr><td colspan="3"><em>...and 9 more instances</em></td></tr>
+        </table>
+        
+        <h3>Behavioral Assessment Summary</h3>
+        <ul>
+            <li><strong>Patient Attention:</strong> 72% - BELOW STANDARD</li>
+            <li><strong>Examination Thoroughness:</strong> RUSHED - Complex patient with multiple surgeries examined in ~18 minutes</li>
+            <li><strong>Measurement Methodology:</strong> SUBSTANDARD - No objective measurement tools observed</li>
+        </ul>
+    </div>
+
+    <h2>TIMESTAMPED EXAMINATION LOG</h2>
+    <p><em>Timestamps formatted for future video linking capability</em></p>
+    
+    <div class="test-log">
+<div style="margin: 8px 0;"><span class="test">=== INSPECTION TESTING (2:40 - 18:50) ===</span></div>
+<div><span class="ts">[2:40]</span> <span class="body-part">Right Elbow</span>: Patient in blue shirt sitting on examination table...</div>
+<div><span class="ts">[9:55]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs examining patient's right ...</div>
+<div><span class="ts">[10:35]</span> <span class="body-part">Cervical Spine</span>: Doctor observing patient who appears to be extendi...</div>
+<div><span class="ts">[14:25]</span> <span class="body-part">Left Knee</span>: Patient seated on examination table in blue shirt ...</div>
+<div><span class="ts">[15:35]</span> <span class="body-part">Other</span>: Doctor appears to be examining or assessing patien...</div>
+<div><span class="ts">[16:30]</span> <span class="body-part">Right Knee</span>: Patient sitting on examination table in blue shirt...</div>
+<div><span class="ts">[17:10]</span> <span class="body-part">Other</span>: Patient in blue medical gown standing in profile p...</div>
+<div><span class="ts">[18:50]</span> <span class="body-part">Right Knee</span>: Patient seated on examination table with doctor po...</div>
+<div style="margin: 8px 0;"><span class="test">=== PALPATION TESTING (10:00 - 17:05) ===</span></div>
+<div><span class="ts">[10:00]</span> <span class="body-part">Cervical Spine</span>: Doctor in burgundy scrubs performing cervical spin...</div>
+<div><span class="ts">[10:05]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs performing palpation exa...</div>
+<div><span class="ts">[10:10]</span> <span class="body-part">Other</span>: Doctor performing facial palpation examination on ...</div>
+<div><span class="ts">[10:50]</span> <span class="body-part">Left Knee</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[11:40]</span> <span class="body-part">Right Knee</span>: Doctor in purple shirt performing palpation examin...</div>
+<div><span class="ts">[11:45]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[11:50]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs palpating patient's right ...</div>
+<div><span class="ts">[11:55]</span> <span class="body-part">Right Knee</span>: Examiner in blue jacket performing palpation exami...</div>
+<div><span class="ts">[12:05]</span> <span class="body-part">Right Knee</span>: Doctor in blue shirt performing palpation examinat...</div>
+<div><span class="ts">[12:15]</span> <span class="body-part">Right Knee</span>: Doctor in burgundy scrubs performing palpation exa...</div>
+<div><span class="ts">[12:25]</span> <span class="body-part">Right Knee</span>: Doctor in purple top performing palpation examinat...</div>
+<div><span class="ts">[12:30]</span> <span class="body-part">Right Knee</span>: Examiner in purple shirt performing palpation exam...</div>
+<div><span class="ts">[12:35]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[12:40]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[12:45]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[12:50]</span> <span class="body-part">Left Elbow</span>: Doctor in purple scrubs examining patient's left e...</div>
+<div><span class="ts">[12:55]</span> <span class="body-part">Right Elbow</span>: Doctor in purple shirt examining patient's right e...</div>
+<div><span class="ts">[13:00]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[13:05]</span> <span class="body-part">Right Elbow</span>: Doctor in purple scrubs examining patient's right ...</div>
+<div><span class="ts">[13:25]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs examining patient's right ...</div>
+<div><span class="ts">[13:30]</span> <span class="body-part">Right Elbow</span>: Doctor in purple scrubs palpating patient's right ...</div>
+<div><span class="ts">[13:55]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs performing palpation exa...</div>
+<div><span class="ts">[14:00]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs performing palpation exa...</div>
+<div><span class="ts">[14:15]</span> <span class="body-part">Lumbar Spine</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[14:20]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs examining patient's righ...</div>
+<div><span class="ts">[14:35]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs examining patient's righ...</div>
+<div><span class="ts">[14:40]</span> <span class="body-part">Right Elbow</span>: Doctor in burgundy scrubs examining patient's righ...</div>
+<div><span class="ts">[15:10]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[15:15]</span> <span class="body-part">Lumbar Spine</span>: Doctor performing palpation examination of patient...</div>
+<div><span class="ts">[15:40]</span> <span class="body-part">Right Knee</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[15:45]</span> <span class="body-part">Right Knee</span>: Doctor in purple shirt examining patient's right k...</div>
+<div><span class="ts">[15:50]</span> <span class="body-part">Left Knee</span>: Examiner performing palpation examination of patie...</div>
+<div><span class="ts">[16:05]</span> <span class="body-part">Right Knee</span>: Doctor in purple shirt examining patient's right k...</div>
+<div><span class="ts">[16:15]</span> <span class="body-part">Right Elbow</span>: Doctor in purple scrubs examining patient's right ...</div>
+<div><span class="ts">[16:45]</span> <span class="body-part">Lumbar Spine</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[16:50]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[16:55]</span> <span class="body-part">Lumbar Spine</span>: Doctor in purple scrubs performing palpation exami...</div>
+<div><span class="ts">[17:00]</span> <span class="body-part">Lumbar Spine</span>: Doctor in burgundy scrubs performing palpation exa...</div>
+<div><span class="ts">[17:05]</span> <span class="body-part">Thoracic Spine</span>: Doctor in burgundy scrubs performing palpation exa...</div>
+<div style="margin: 8px 0;"><span class="test">=== ROM TESTING (0:15 - 17:15) ===</span></div>
+<div><span class="ts">[0:15]</span> <span class="body-part">Right Shoulder</span>: Patient in blue shirt performing shoulder range of...</div>
+<div><span class="ts">[11:20]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs examining patient's right ...</div>
+<div><span class="ts">[11:25]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs examining patient's right ...</div>
+<div><span class="ts">[11:30]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs assessing patient's right ...</div>
+<div><span class="ts">[12:00]</span> <span class="body-part">Right Elbow</span>: Patient in blue shirt performing elbow range of mo...</div>
+<div><span class="ts">[12:10]</span> <span class="body-part">Right Knee</span>: Examiner assessing knee range of motion while pati...</div>
+<div><span class="ts">[14:10]</span> <span class="body-part">Cervical Spine</span>: Doctor in burgundy scrubs appears to be examining ...</div>
+<div><span class="ts">[14:50]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs examining patient's righ...</div>
+<div><span class="ts">[15:05]</span> <span class="body-part">Cervical Spine</span>: Patient in purple shirt appears to be performing n...</div>
+<div><span class="ts">[15:20]</span> <span class="body-part">Left Shoulder</span>: Patient raising left arm overhead while examiner o...</div>
+<div><span class="ts">[15:25]</span> <span class="body-part">Right Shoulder</span>: Patient performing shoulder range of motion moveme...</div>
+<div><span class="ts">[15:30]</span> <span class="body-part">Right Shoulder</span>: Patient performing right shoulder abduction while ...</div>
+<div><span class="ts">[16:10]</span> <span class="body-part">Right Shoulder</span>: Doctor examining patient's right shoulder range of...</div>
+<div><span class="ts">[16:20]</span> <span class="body-part">Right Shoulder</span>: Doctor assessing patient's right shoulder abductio...</div>
+<div><span class="ts">[17:15]</span> <span class="body-part">Cervical Spine</span>: Patient in blue shirt performing cervical spine ro...</div>
+<div style="margin: 8px 0;"><span class="test">=== STRENGTH TESTING (14:05 - 14:45) ===</span></div>
+<div><span class="ts">[14:05]</span> <span class="body-part">Right Shoulder</span>: Doctor in burgundy scrubs examining patient in blu...</div>
+<div><span class="ts">[14:45]</span> <span class="body-part">Right Shoulder</span>: Doctor in purple scrubs performing handshake grip ...</div>
+<div style="margin: 8px 0;"><span class="test">=== REFLEX TESTING (12:20 - 16:35) ===</span></div>
+<div><span class="ts">[12:20]</span> <span class="body-part">Right Knee</span>: Doctor in burgundy scrubs performing knee reflex t...</div>
+<div><span class="ts">[13:40]</span> <span class="body-part">Right Knee</span>: Patient seated on examination table while examiner...</div>
+<div><span class="ts">[16:35]</span> <span class="body-part">Right Knee</span>: Patient seated on examination table while reflex h...</div>
+<div style="margin: 8px 0;"><span class="test">=== CRANIAL NERVE TESTING (11:35 - 11:35) ===</span></div>
+<div><span class="ts">[11:35]</span> <span class="body-part">Other</span>: Doctor performing eye examination using ophthalmos...</div>
+<div style="margin: 8px 0;"><span class="test">=== GAIT TESTING (18:35 - 18:35) ===</span></div>
+<div><span class="ts">[18:35]</span> <span class="body-part">General</span>: Patient using cane for ambulation while examiner o...</div>
+    </div>
+
+    <h2>CLAIM VS. VIDEO REALITY</h2>
+
+    <h3>1. Cervical Spine Range of Motion</h3>
+    <div class="comparison">
+        <div class="claim-box">
+            <h4>REPORT CLAIMS:</h4>
+            <ul>
+                <li>Extension: 30 degrees</li>
+                <li>Flexion: 40 degrees</li>
+                <li>Lateral rotation: 45° R, 50° L</li>
+                <li>Lateral flexion: 20° both sides</li>
+            </ul>
+        </div>
+        <div class="reality-box">
+            <h4>VIDEO REALITY:</h4>
+            <p class="not-done">NO GONIOMETER OR INCLINOMETER USED</p>
+            <p>ROM testing observed at:</p>
+            <ul>
+<li><span class="timestamp">14:10</span> - Visual estimation only</li>
+            </ul>
+            <p>Without instrumentation, specific degree claims cannot be verified.</p>
+        </div>
+    </div>
+    <div class="ref">
+        <strong>Standard of Care:</strong> Accurate ROM measurement requires goniometer or inclinometer with documented values compared to established normal ranges (AMA Guides). Visual estimation alone does not meet objective measurement standards. <em>See: Hirsch et al. (2014) Am J Orthop, 43(11), E261-E265.</em>
+    </div>
+
+    <h3>2. Right Shoulder Range of Motion</h3>
+    <div class="comparison">
+        <div class="claim-box">
+            <h4>REPORT CLAIMS:</h4>
+            <ul>
+                <li>Forward flexion: 180 degrees</li>
+                <li>Abduction: 180 degrees</li>
+                <li>Internal rotation: to T5</li>
+                <li>External rotation: 45 degrees</li>
+            </ul>
+        </div>
+        <div class="reality-box">
+            <h4>VIDEO REALITY:</h4>
+            <p>Shoulder examination timestamps:</p>
+            <ul>
+<li><span class="timestamp">0:15</span> - rom</li>
+<li><span class="timestamp">10:05</span> - palpation</li>
+<li><span class="timestamp">11:20</span> - rom</li>
+<li><span class="timestamp">11:25</span> - rom</li>
+            </ul>
+            <p class="not-done">NO GONIOMETER USED for measurements</p>
+        </div>
+    </div>
+
+    <h3>3. Left Shoulder Range of Motion</h3>
+    <div class="comparison">
+        <div class="claim-box">
+            <h4>REPORT CLAIMS:</h4>
+            <ul>
+                <li>Forward flexion: 170 degrees</li>
+                <li>Abduction: 175 degrees</li>
+                <li>Internal rotation: to L1</li>
+                <li>External rotation: 60 degrees</li>
+            </ul>
+        </div>
+        <div class="reality-box">
+            <h4>VIDEO REALITY:</h4>
+<p>Left shoulder examined at <span class="timestamp">15:20</span></p>
+            <p class="not-done">NO GONIOMETER USED</p>
+        </div>
+    </div>
+
+    <h3>4. Neurological Examination</h3>
+    <div class="comparison">
+        <div class="claim-box">
+            <h4>REPORT CLAIMS:</h4>
+            <ul>
+                <li>Strength: 5/5 intact</li>
+                <li>Reflexes: 2+, brisk and symmetric</li>
+                <li>Sensation: decreased in right C7/C8</li>
+                <li>Tinel's: negative bilaterally</li>
+            </ul>
+        </div>
+        <div class="reality-box">
+            <h4>VIDEO REALITY:</h4>
+            <table style="margin:0;">
+                <tr><td>Strength testing</td><td>2 frames</td></tr>
+                <tr><td>Reflex testing</td><td>3 frames</td></tr>
+                <tr><td>Reflex hammer visible</td><td>4 frames</td></tr>
+                <tr><td>Cranial nerve testing</td><td>1 frames</td></tr>
+            </table>
+            <p class="not-done">Lower extremity neuro exam NOT observed</p>
+        </div>
+    </div>
+
+    <h2>BODY PART EXAMINATION TIMELINE</h2>
+    <table>
+        <tr><th>Body Part</th><th>First Examined</th><th>Last Examined</th><th>Tests Performed</th><th>Frames</th></tr>
+        <tr>
+            <td><strong>Cervical Spine</strong></td>
+            <td><span class="timestamp">10:00</span></td>
+            <td><span class="timestamp">17:15</span></td>
+            <td>palpation, rom, inspection</td>
+            <td>5</td>
+        </tr>
+        <tr>
+            <td><strong>Thoracic Spine</strong></td>
+            <td><span class="timestamp">17:05</span></td>
+            <td><span class="timestamp">17:05</span></td>
+            <td>palpation</td>
+            <td>1</td>
+        </tr>
+        <tr>
+            <td><strong>Lumbar Spine</strong></td>
+            <td><span class="timestamp">14:15</span></td>
+            <td><span class="timestamp">17:00</span></td>
+            <td>palpation</td>
+            <td>5</td>
+        </tr>
+        <tr>
+            <td><strong>Right Shoulder</strong></td>
+            <td><span class="timestamp">0:15</span></td>
+            <td><span class="timestamp">16:50</span></td>
+            <td>palpation, rom, strength</td>
+            <td>20</td>
+        </tr>
+        <tr>
+            <td><strong>Left Shoulder</strong></td>
+            <td><span class="timestamp">15:20</span></td>
+            <td><span class="timestamp">15:20</span></td>
+            <td>rom</td>
+            <td>1</td>
+        </tr>
+        <tr>
+            <td><strong>Right Elbow</strong></td>
+            <td><span class="timestamp">2:40</span></td>
+            <td><span class="timestamp">16:15</span></td>
+            <td>palpation, rom, inspection</td>
+            <td>7</td>
+        </tr>
+        <tr>
+            <td><strong>Left Elbow</strong></td>
+            <td><span class="timestamp">12:50</span></td>
+            <td><span class="timestamp">12:50</span></td>
+            <td>palpation</td>
+            <td>1</td>
+        </tr>
+        <tr>
+            <td><strong>Right Knee</strong></td>
+            <td><span class="timestamp">9:55</span></td>
+            <td><span class="timestamp">18:50</span></td>
+            <td>reflex, palpation, rom, inspection</td>
+            <td>21</td>
+        </tr>
+        <tr>
+            <td><strong>Left Knee</strong></td>
+            <td><span class="timestamp">10:50</span></td>
+            <td><span class="timestamp">15:50</span></td>
+            <td>palpation, inspection</td>
+            <td>3</td>
+        </tr>
+    </table>
+
+    <h2>EXAMINATION COMPONENTS OBSERVED</h2>
+    <table>
+        <tr><th>Test Type</th><th>Frames Observed</th><th>First Timestamp</th><th>Last Timestamp</th></tr>
+        <tr>
+            <td>Palpation</td>
+            <td>39</td>
+            <td><span class="timestamp">10:00</span></td>
+            <td><span class="timestamp">17:05</span></td>
+        </tr>
+        <tr>
+            <td>Rom</td>
+            <td>15</td>
+            <td><span class="timestamp">0:15</span></td>
+            <td><span class="timestamp">17:15</span></td>
+        </tr>
+        <tr>
+            <td>Inspection</td>
+            <td>8</td>
+            <td><span class="timestamp">2:40</span></td>
+            <td><span class="timestamp">18:50</span></td>
+        </tr>
+        <tr>
+            <td>Reflex</td>
+            <td>3</td>
+            <td><span class="timestamp">12:20</span></td>
+            <td><span class="timestamp">16:35</span></td>
+        </tr>
+        <tr>
+            <td>Strength</td>
+            <td>2</td>
+            <td><span class="timestamp">14:05</span></td>
+            <td><span class="timestamp">14:45</span></td>
+        </tr>
+        <tr>
+            <td>Cranial Nerve</td>
+            <td>1</td>
+            <td><span class="timestamp">11:35</span></td>
+            <td><span class="timestamp">11:35</span></td>
+        </tr>
+        <tr>
+            <td>Gait</td>
+            <td>1</td>
+            <td><span class="timestamp">18:35</span></td>
+            <td><span class="timestamp">18:35</span></td>
+        </tr>
+    </table>
+
+    <h2>PATIENT DISTRESS DOCUMENTATION</h2>
+    <div class="warning">
+        <p><strong>3 instances of patient distress observed:</strong></p>
+        <table>
+            <tr><th>Timestamp</th><th>Observation</th></tr>
+            <tr>
+                <td><span class="timestamp">0:35</span></td>
+                <td>Patient sitting on examination table holding head in hand, appearing distressed or in discomfort, wearing blue shirt and white shorts</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">6:35</span></td>
+                <td>Patient sitting alone appearing distressed with hand to face, no medical professional visible in frame</td>
+            </tr>
+            <tr>
+                <td><span class="timestamp">17:45</span></td>
+                <td>Patient sitting on examination table in blue shirt and white shorts, hand to face in distressed posture, appears to be during consultation phase</td>
+            </tr>
+        </table>
+    </div>
+
+    <h2>STANDARD OF CARE REFERENCES</h2>
+    <div class="info">
+        <h3>Range of Motion Measurement</h3>
+        <p>Per AMA Guides to the Evaluation of Permanent Impairment and AAOS standards, objective ROM assessment requires:</p>
+        <ul>
+            <li>Use of calibrated goniometer or inclinometer</li>
+            <li>Documentation of specific measurements in degrees</li>
+            <li>Comparison to established normal values</li>
+            <li>Multiple measurements (3x) for reliability</li>
+        </ul>
+        <p><strong>Normal Cervical ROM (AMA Guides):</strong> Flexion 50°, Extension 60°, Lateral Flexion 45° each side, Rotation 80° each side</p>
+        <p><strong>Normal Shoulder ROM:</strong> Forward Flexion 180°, Abduction 180°, External Rotation 90°, Internal Rotation 90°</p>
+        <p><strong>Citation:</strong> Hirsch et al. (2014) demonstrated that visual ROM estimation is NOT accurate. Am J Orthop, 43(11), E261-E265.</p>
+    </div>
+
+    <div class="info">
+        <h3>Neurological Examination</h3>
+        <p>Complete neurological examination should include:</p>
+        <ul>
+            <li>Motor strength testing (graded 0-5) - upper AND lower extremities</li>
+            <li>Deep tendon reflexes (graded 0-4+) - biceps, triceps, brachioradialis, patellar, Achilles</li>
+            <li>Sensory testing (light touch, pinprick, proprioception)</li>
+            <li>Cranial nerve assessment (all 12 nerves for completeness)</li>
+            <li>Coordination and gait assessment</li>
+            <li>Special tests: Hoffman's sign, Babinski reflex for upper motor neuron lesions</li>
+        </ul>
+    </div>
+
+    <div class="info">
+        <h3>Comprehensive Examination Duration</h3>
+        <p>For a patient with Tracy Green's history (multiple surgeries, ongoing pain, complex orthopedic issues):</p>
+        <ul>
+            <li>Standard comprehensive CME: 30-45 minutes hands-on examination</li>
+            <li>This examination: ~18 minutes (<strong class="not-done">BELOW STANDARD</strong>)</li>
+        </ul>
+    </div>
+
+    <div class="summary-box">
+        <h2>EXECUTIVE SUMMARY</h2>
+        <p>Video analysis of Dr. Jacobs' CME of Tracy Green reveals the following significant concerns:</p>
+        <ol>
+            <li><strong>ROM measurements claimed without instrumentation</strong> - Report states specific degrees but no goniometer/inclinometer observed in any frame</li>
+            <li><strong>Doctor attention to patient only 72%</strong> - Documented 19 instances where examiner not observing patient during physical exam</li>
+            <li><strong>Rushed examination</strong> - ~18 minute exam for complex multi-surgical patient (standard: 30-45 min)</li>
+            <li><strong>Patient distress noted</strong> - 3 instances documented during examination</li>
+            <li><strong>Incomplete neurological exam</strong> - Lower extremity testing not observed despite patient's history of back issues with leg symptoms</li>
+        </ol>
+        <p style="margin-top: 15px;"><em>The specific ROM measurements claimed in the report cannot be independently verified as no measurement instrumentation was observed during testing.</em></p>
+    </div>
+
+    <hr>
+    <p style="font-size: 0.85em; color: #666;">
+        <strong>Report Generated:</strong> February 27, 2026<br>
+        <strong>Analysis Method:</strong> AI-assisted video frame analysis (230 frames at 5-second intervals)<br>
+        <strong>Video Duration:</strong> 19:09<br>
+
+    </p>
+</body>
+</html>

@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "description": "v1 golden set of real, human-curated CME frames sourced from the Osborn 2021-03-09 case (0.5s sampling). Labels follow the production analyzer vocabulary in backend/lambda_functions/prompts/production.py. See docs/golden_set_curation.md for the curation rationale and limitations.",
+  "clips": [
+    {
+      "id": "conversation_eye_contact",
+      "notes": "Intake/history-taking moment with both parties seated and the doctor facing the patient. Positive engagement baseline.",
+      "frames_dir": "conversation_eye_contact/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "conversation",
+        "body_region": "none",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "doctor_facing_patient": true,
+        "doctor_making_eye_contact": true,
+        "patient_visible_distress": false,
+        "doctor_on_phone_or_distracted": false,
+        "notes": "Doctor and patient seated face-to-face during the interview portion of the exam; clear eye contact and engaged posture."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_0103.jpg",
+        "source_timestamp_sec": 51.0,
+        "frames": ["video1_frame_0103.jpg", "video1_frame_0104.jpg"]
+      }
+    },
+    {
+      "id": "doctor_taking_notes",
+      "notes": "Doctor seated at desk with back partially turned, writing on paperwork rather than engaging the patient during what is still the conversation phase.",
+      "frames_dir": "doctor_taking_notes/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "conversation",
+        "body_region": "none",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "doctor_facing_patient": false,
+        "doctor_making_eye_contact": false,
+        "patient_visible_distress": false,
+        "doctor_on_phone_or_distracted": false,
+        "notes": "Doctor turned toward the desk taking notes; not facing the patient and not making eye contact. Exercises the inattention behavior signal without phone distraction."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_0102.jpg",
+        "source_timestamp_sec": 50.5,
+        "frames": ["video1_frame_0102.jpg"]
+      }
+    },
+    {
+      "id": "doctor_on_phone",
+      "notes": "Doctor holding phone to ear while patient sits waiting; classic distraction red flag.",
+      "frames_dir": "doctor_on_phone/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "conversation",
+        "body_region": "none",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "doctor_facing_patient": false,
+        "doctor_making_eye_contact": false,
+        "doctor_on_phone_or_distracted": true,
+        "patient_visible_distress": false,
+        "notes": "Doctor on phone during examination time while patient waits seated; exercises the doctor_on_phone_or_distracted signal."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_0111.jpg",
+        "source_timestamp_sec": 55.0,
+        "frames": ["video1_frame_0111.jpg"]
+      }
+    },
+    {
+      "id": "patient_distress",
+      "notes": "Patient covering face / wiping eyes consistent with emotional distress while doctor continues writing notes. Two consecutive frames confirm the distress is sustained, not a momentary expression.",
+      "frames_dir": "patient_distress/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "conversation",
+        "body_region": "none",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "patient_visible_distress": true,
+        "doctor_facing_patient": false,
+        "doctor_making_eye_contact": false,
+        "doctor_on_phone_or_distracted": false,
+        "notes": "Patient is visibly emotionally distressed (hand to face / wiping eyes) across consecutive frames; doctor is turned to paperwork rather than acknowledging the distress."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_0349.jpg",
+        "source_timestamp_sec": 174.0,
+        "frames": ["video1_frame_0349.jpg", "video1_frame_0350.jpg"]
+      }
+    },
+    {
+      "id": "strength_test_through_clothing",
+      "notes": "Active manual muscle/strength testing on the arm while patient remains in street clothes. Exercises both test_type=strength and the testing_through_clothing technique flag.",
+      "frames_dir": "strength_test_through_clothing/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "strength",
+        "body_region": "arm",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "doctor_facing_patient": true,
+        "patient_visible_distress": false,
+        "doctor_on_phone_or_distracted": false,
+        "technique_issues": ["patient_not_in_gown", "testing_through_clothing"],
+        "notes": "Manual muscle/resistance testing of the arm with patient in street clothes; the testing-through-clothing flag is the legally relevant red flag."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_0181.jpg",
+        "source_timestamp_sec": 90.0,
+        "frames": ["video1_frame_0181.jpg"]
+      }
+    },
+    {
+      "id": "rom_no_goniometer",
+      "notes": "Range-of-motion assessment of the leg with no measurement device visible. This is the no_goniometer red flag that directly contradicts the report's claim of objective ROM measurement. Two consecutive frames confirm the equipment is absent across the test, not just a single sampling.",
+      "frames_dir": "rom_no_goniometer/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "rom",
+        "body_region": "leg",
+        "patient_attire": "regular_clothes",
+        "visibility": "partial",
+        "doctor_facing_patient": true,
+        "equipment_visible": [],
+        "technique_issues": ["patient_not_in_gown", "no_goniometer"],
+        "notes": "ROM testing of the leg without a goniometer or other measurement device. The legal red flag here is no_goniometer, which the v1 analyzer correctly flagged on the adjacent frame and which we accept after manual re-review."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_1885.jpg",
+        "source_timestamp_sec": 942.0,
+        "frames": ["video1_frame_1885.jpg", "video1_frame_1886.jpg"]
+      }
+    },
+    {
+      "id": "gait_in_street_clothes",
+      "notes": "Hallway gait assessment with doctor walking alongside the patient; both visible, but patient is in street clothes rather than gown.",
+      "frames_dir": "gait_in_street_clothes/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "gait",
+        "body_region": "full_body",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "doctor_facing_patient": true,
+        "doctor_on_phone_or_distracted": false,
+        "technique_issues": ["patient_not_in_gown"],
+        "notes": "Gait test conducted in a hallway with patient in street clothes; exercises test_type=gait and the patient_not_in_gown attire flag."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_1493.jpg",
+        "source_timestamp_sec": 746.0,
+        "frames": ["video1_frame_1493.jpg"]
+      }
+    },
+    {
+      "id": "palpation_neck",
+      "notes": "Two-handed palpation of the neck while patient remains in street clothes.",
+      "frames_dir": "palpation_neck/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "palpation",
+        "body_region": "neck",
+        "patient_attire": "regular_clothes",
+        "visibility": "full",
+        "doctor_facing_patient": true,
+        "doctor_on_phone_or_distracted": false,
+        "technique_issues": ["patient_not_in_gown", "testing_through_clothing"],
+        "notes": "Bilateral neck palpation with patient still in street clothes; doctor's gaze is on the exam site rather than on the patient's face."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_1687.jpg",
+        "source_timestamp_sec": 843.0,
+        "frames": ["video1_frame_1687.jpg"]
+      }
+    },
+    {
+      "id": "sensory_through_clothing",
+      "notes": "Sensory testing performed over the sleeve of a black cardigan rather than on bare skin. Patient is partially gowned for the upper body but the sleeve still blocks the tested area.",
+      "frames_dir": "sensory_through_clothing/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "sensory",
+        "body_region": "arm",
+        "patient_attire": "partial",
+        "visibility": "full",
+        "doctor_facing_patient": true,
+        "doctor_on_phone_or_distracted": false,
+        "technique_issues": ["testing_through_clothing"],
+        "notes": "Sensory exam performed over a cardigan sleeve; the testing_through_clothing flag fires even though the patient is otherwise partially gowned."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_1907.jpg",
+        "source_timestamp_sec": 953.0,
+        "frames": ["video1_frame_1907.jpg"]
+      }
+    },
+    {
+      "id": "obscured_hallway",
+      "notes": "Empty hallway / transition shot with no doctor or patient visible. Exercises the obscured-visibility code path so the eval cannot get away with hallucinating exam content.",
+      "frames_dir": "obscured_hallway/frames",
+      "eval_frame_glob": "video1_frame_*.jpg",
+      "expected": {
+        "test_type": "none",
+        "body_region": "none",
+        "visibility": "obscured",
+        "notes": "No exam visible: empty hallway / setup shot. Categorical attire and behavior fields are intentionally omitted because neither party is in frame."
+      },
+      "match": {
+        "source_video": "cme_projects/osborn_2021_03/analysis_run_halfsec/frames/video1_frame_1487.jpg",
+        "source_timestamp_sec": 743.0,
+        "frames": ["video1_frame_1487.jpg"]
+      }
+    }
+  ]
+}

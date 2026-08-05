@@ -23,6 +23,35 @@ CME_SESSIONS_TABLE = os.environ.get('CME_SESSIONS_TABLE', 'cme-sessions')
 S3_BUCKET = os.environ.get('S3_BUCKET', 'cme-analysis-recordings-388846700527')
 
 
+def _mark_session_error_for_job(job_id: str, *, stage: str, error: str) -> None:
+    """Find the session owning this MediaConvert job and mark it failed."""
+    import time
+    try:
+        sessions_table = dynamodb.Table(CME_SESSIONS_TABLE)
+        response = sessions_table.scan(
+            FilterExpression='conversion_job_id = :job_id',
+            ExpressionAttributeValues={':job_id': job_id}
+        )
+        for session in response.get('Items', []):
+            sessions_table.update_item(
+                Key={'session_id': session['session_id']},
+                UpdateExpression=(
+                    'SET #status = :status, processing_stage = :stage, '
+                    'last_error = :err, updated_at = :updated'
+                ),
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': 'error',
+                    ':stage': stage,
+                    ':err': error[:500],
+                    ':updated': int(time.time()),
+                },
+            )
+            logger.error(f"Marked session {session['session_id']} failed: {error}")
+    except Exception as e:
+        logger.error(f"Failed to mark session error for job {job_id}: {e}")
+
+
 def handler(event, context):
     """
     Handle MediaConvert job completion event
@@ -42,30 +71,32 @@ def handler(event, context):
         
         logger.info(f"MediaConvert job {job_id} status: {status}")
         
+        if status in ('ERROR', 'CANCELED'):
+            # Terminal failure: mark the session so it does not sit in
+            # 'converting'/'processing' forever with no way forward.
+            _mark_session_error_for_job(
+                job_id,
+                stage='conversion_failed',
+                error=f"MediaConvert job {job_id} ended with status {status}",
+            )
+            return {'statusCode': 200, 'body': f'Job {status}; session marked failed'}
+        
         if status != 'COMPLETE':
             logger.info(f"Job {job_id} not complete yet (status: {status}), ignoring")
             return {'statusCode': 200, 'body': f'Job {status}, not triggering transcription'}
         
-        # Get job details to find output file
+        # Extract output file path from EventBridge event (it's already in the event!)
         try:
-            # Get MediaConvert endpoint
-            endpoints = mediaconvert_client.describe_endpoints()
-            mediaconvert_endpoint = endpoints['Endpoints'][0]['Url']
-            mediaconvert = boto3.client('mediaconvert', endpoint_url=mediaconvert_endpoint, region_name=os.environ.get('AWS_REGION', 'us-east-1'))
-            
-            job_response = mediaconvert.get_job(Id=job_id)
-            job = job_response['Job']
-            
-            # Extract output file path
-            output_group_details = job.get('OutputGroupDetails', [])
+            # The output file path is in the event detail
+            output_group_details = detail.get('outputGroupDetails', [])
             if not output_group_details:
-                logger.error(f"No output details for job {job_id}")
-                return {'statusCode': 500, 'body': 'No output details'}
+                logger.error(f"No output details in event for job {job_id}")
+                return {'statusCode': 500, 'body': 'No output details in event'}
             
-            output_file_paths = output_group_details[0].get('OutputDetails', [{}])[0].get('OutputFilePaths', [])
+            output_file_paths = output_group_details[0].get('outputDetails', [{}])[0].get('outputFilePaths', [])
             if not output_file_paths:
-                logger.error(f"No output file paths for job {job_id}")
-                return {'statusCode': 500, 'body': 'No output file paths'}
+                logger.error(f"No output file paths in event for job {job_id}")
+                return {'statusCode': 500, 'body': 'No output file paths in event'}
             
             output_uri = output_file_paths[0]
             logger.info(f"Conversion complete! Output file: {output_uri}")
@@ -137,9 +168,15 @@ def handler(event, context):
                 logger.error(f"Transcription failed: {transcription_result.get('error')}")
                 sessions_table.update_item(
                     Key={'session_id': session_id},
-                    UpdateExpression='SET processing_stage = :stage, updated_at = :updated',
+                    UpdateExpression=(
+                        'SET #status = :status, processing_stage = :stage, '
+                        'last_error = :err, updated_at = :updated'
+                    ),
+                    ExpressionAttributeNames={'#status': 'status'},
                     ExpressionAttributeValues={
+                        ':status': 'error',
                         ':stage': 'transcription_failed',
+                        ':err': str(transcription_result.get('error') or 'transcription trigger failed')[:500],
                         ':updated': int(__import__('time').time())
                     }
                 )

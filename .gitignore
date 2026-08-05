@@ -28,6 +28,9 @@ yarn-error.log*
 cdk.out/
 .cdk.staging/
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # IDE
 .vscode/
 .idea/
@@ -41,7 +44,43 @@ Thumbs.db
 
 # Build outputs
 /frontend/build/
-/backend/lambda_function.zip
+
+# Lambda deployment bundles (regenerate via packaging / deploy)
+backend/lambda_functions/*.zip
+
+# Local CME project outputs (video, frames, JSON, HTML/PDF reports)
+cme_projects/
+
+# Raw media at repo root (often sensitive or very large)
+/*.mp4
+/*.MP4
+/*.mpg
+/*.mpeg
+/*.mov
+/*.avi
+/*.mkv
+
+# Generated analysis exports at repo root
+/cme_report*.html
+/cme_report*.pdf
+/cme_report*.json
+/HARDECKER_*
+
+# Large / regenerable training & PDF extraction JSON at repo root
+/cme_complete_knowledge_base.json
+/cme_complete_parsing_log.json
+/cme_ocr_parsed.json
+/cme_reference_knowledge_base.json
+/cme_reference_parsing_progress.json
+/comprehensive_pdf_extraction.json
+/comprehensive_pdf_progress.json
+/pdf_processing_progress.json
+/dr_hunter_ground_truth.json
+/extracted_test_terminology.json
+/hunter_analysis_roberts.json
+/hunter_methodology_knowledge_base.json
+/master_analyzer_test_result.json
+/training_data_catalog.json
 
 # Logs
 *.log
@@ -73,6 +112,10 @@ disc & facet trauma/
 ortho exam Oregon Hunter/
 Spine Imaging/
 
+# Real-case analysis output must never be committed or publicly served
+frontend/public/sample-case/
+
 # Large result/export files (keep config JSONs)
 aaos_extraction_result.json
 extracted_tests_results.json
+.vercel

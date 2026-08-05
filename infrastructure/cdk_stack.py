@@ -219,11 +219,21 @@ class CMEAnalysisPlatformStack(Stack):
             resources=["*"]
         ))
 
+        # Grant Step Functions and cross-Lambda invoke for pipeline orchestration
+        lambda_role.add_to_policy(iam.PolicyStatement(
+            actions=["states:StartExecution"],
+            resources=["*"]
+        ))
+        lambda_role.add_to_policy(iam.PolicyStatement(
+            actions=["lambda:InvokeFunction"],
+            resources=["*"]
+        ))
+
         # Main API Lambda
         api_lambda = lambda_.Function(
             self, "CMEAPIHandler",
             function_name="cme-api-handler",
-            runtime=lambda_.Runtime.PYTHON_3_12,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_asset("../backend/lambda_functions"),
             handler="cme_handler.handler",
             timeout=Duration.seconds(30),
@@ -245,7 +255,7 @@ class CMEAnalysisPlatformStack(Stack):
         transcription_waiter_lambda = lambda_.Function(
             self, "TranscriptionWaiter",
             function_name="cme-transcription-waiter",
-            runtime=lambda_.Runtime.PYTHON_3_12,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_asset("../backend/lambda_functions"),
             handler="transcription_waiter.handler",
             timeout=Duration.seconds(30),
@@ -260,7 +270,7 @@ class CMEAnalysisPlatformStack(Stack):
         nlp_lambda = lambda_.Function(
             self, "CMENLPProcessor",
             function_name="cme-nlp-processor",
-            runtime=lambda_.Runtime.PYTHON_3_12,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_asset("../backend/lambda_functions"),
             handler="cme_nlp_processor.handler",
             timeout=Duration.minutes(5),
@@ -277,12 +287,12 @@ class CMEAnalysisPlatformStack(Stack):
         video_lambda = lambda_.Function(
             self, "CMEVideoProcessor",
             function_name="cme-video-processor",
-            runtime=lambda_.Runtime.PYTHON_3_12,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_asset("../backend/lambda_functions"),
             handler="cme_video_processor.handler",
             timeout=Duration.minutes(15),
             memory_size=3008,
-            ephemeral_storage_size=lambda_.Size.gibibytes(10),  # For video processing
+            # ephemeral_storage_size=lambda_.Size.gibibytes(10),  # For video processing - CDK version issue
             role=lambda_role,
             environment={
                 "S3_BUCKET": cme_bucket.bucket_name,
@@ -294,7 +304,7 @@ class CMEAnalysisPlatformStack(Stack):
         report_lambda = lambda_.Function(
             self, "CMEReportGenerator",
             function_name="cme-report-generator",
-            runtime=lambda_.Runtime.PYTHON_3_12,
+            runtime=lambda_.Runtime.PYTHON_3_11,
             code=lambda_.Code.from_asset("../backend/lambda_functions"),
             handler="cme_report_generator.generate_report",
             timeout=Duration.minutes(5),
@@ -393,6 +403,10 @@ class CMEAnalysisPlatformStack(Stack):
         
         # Grant Step Function DynamoDB access
         sessions_table.grant_read_write_data(state_machine)
+
+        # Wire orchestration ARN into API handler (created above; token resolves at deploy)
+        api_lambda.add_environment("STEP_FUNCTION_ARN", state_machine.state_machine_arn)
+        nlp_lambda.grant_invoke(api_lambda)
         
         # ========== Outputs ==========
         self.api_url = api.url

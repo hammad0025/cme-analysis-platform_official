@@ -1,0 +1,27 @@
+{
+    "exam_time": "30 minute examination",
+    
+    "cranial_nerves": "Cranial nerves II through XII grossly normal",
+    
+    "mental_status": "Alert and oriented x3, MMSE score 28/30",
+    
+    "strength": "Motor strength 5/5 throughout upper and lower extremities bilaterally",
+    
+    "sensory": "Sensory intact to light touch and pinprick in all dermatomes",
+    
+    "reflexes": "Deep tendon reflexes 2+ bilaterally at biceps, triceps, patella, and Achilles",
+    
+    "rom": "Cervical spine range of motion within normal limits. Lumbar spine flexion 90 degrees, extension 30 degrees",
+    
+    "romberg": "Romberg negative",
+    
+    "gait": "Gait normal, able to walk on heels and toes without difficulty",
+    
+    "coordination": "Finger-to-nose testing normal bilaterally",
+    
+    "patient_complaints": "Patient reports neck pain radiating to left arm, rates 7/10",
+    
+    "diagnoses": "Cervical strain, resolved. No objective evidence of radiculopathy",
+    
+    "causation": "Any current symptoms are not causally related to the accident"
+}

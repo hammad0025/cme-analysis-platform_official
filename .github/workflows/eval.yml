@@ -1,0 +1,156 @@
+name: Eval (paid)
+
+# This workflow burns API budget. Triggers are intentionally restricted:
+#   - workflow_dispatch: any maintainer can run it manually from the Actions tab.
+#   - pull_request: only when the PR carries the `eval-ok` label.
+# It must NOT run on every push, and it must NOT run automatically on main.
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: Comma-separated providers (anthropic, openai, gemini)
+        default: anthropic
+        required: false
+      threshold-pass-rate:
+        description: Absolute pass-rate floor (0.0 - 1.0)
+        default: "0.70"
+        required: false
+      compare-to-main:
+        description: Also run the eval at origin/main HEAD and report the delta.
+        default: "true"
+        required: false
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: eval-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: Run golden-set eval
+    runs-on: ubuntu-latest
+    # Gate the pull_request trigger on the eval-ok label. workflow_dispatch
+    # has no event.label so the second clause is the canonical check.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request'
+          && (github.event.label.name == 'eval-ok'
+              || contains(github.event.pull_request.labels.*.name, 'eval-ok')))
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install jsonschema anthropic
+
+      - name: Run eval on PR head
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mkdir -p eval_runs
+          python scripts/eval_cme_vision.py \
+            --providers "${{ inputs.providers || 'anthropic' }}" \
+            --threshold-pass-rate "${{ inputs.threshold-pass-rate || '0.70' }}" \
+            --output-dir eval_runs/head \
+            --json-out eval_summary.json \
+            --markdown-out eval_summary.md
+
+      - name: Eval baseline against origin/main (best effort)
+        if: >-
+          github.event_name == 'pull_request'
+          && (inputs.compare-to-main == 'true' || inputs.compare-to-main == null)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base_sha" ]; then
+            echo "[skip] no base sha available; skipping baseline run"
+            exit 0
+          fi
+          echo "Building baseline against $base_sha"
+          git worktree add ../baseline "$base_sha"
+          (
+            cd ../baseline
+            python scripts/eval_cme_vision.py \
+              --providers "${{ inputs.providers || 'anthropic' }}" \
+              --threshold-pass-rate "${{ inputs.threshold-pass-rate || '0.70' }}" \
+              --output-dir eval_runs/baseline \
+              --json-out "$GITHUB_WORKSPACE/baseline_summary.json" \
+              --markdown-out "$GITHUB_WORKSPACE/baseline_summary.md" \
+              || true
+          )
+          if [ -f baseline_summary.json ]; then
+            echo "Re-running PR head with --compare-to baseline"
+            python scripts/eval_cme_vision.py \
+              --providers "${{ inputs.providers || 'anthropic' }}" \
+              --threshold-pass-rate "${{ inputs.threshold-pass-rate || '0.70' }}" \
+              --threshold-regression "0.05" \
+              --output-dir eval_runs/head_with_delta \
+              --json-out eval_summary.json \
+              --markdown-out eval_summary.md \
+              --compare-to baseline_summary.json \
+              --resume
+          else
+            echo "[skip] baseline summary not produced; falling back to absolute eval"
+          fi
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-summary
+          path: |
+            eval_summary.json
+            eval_summary.md
+            eval_runs/
+            baseline_summary.json
+          if-no-files-found: warn
+
+      - name: Post sticky PR comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'eval_summary.md';
+            if (!fs.existsSync(path)) {
+              core.info('No eval_summary.md to post');
+              return;
+            }
+            const body = fs.readFileSync(path, 'utf8');
+            const marker = '<!-- cme-eval-sticky -->';
+            const fullBody = `${marker}\n${body}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: fullBody });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: fullBody });
+            }

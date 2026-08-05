@@ -52,9 +52,12 @@ def create_cme_processing_workflow(
     
     # Add retry logic for transcription polling
     wait_for_transcription.add_retry(
-        errors=["TranscriptionInProgress"],
+        # Must match the errorType raised by transcription_waiter.py
+        errors=["TranscriptionInProgressError"],
         interval=Duration.seconds(30),
-        max_attempts=40,  # 20 minutes max
+        # 60 minutes max: hour-long CME videos (~1 GB) routinely take
+        # 30-45 min in AWS Transcribe; 40 attempts (20 min) was too short.
+        max_attempts=120,
         backoff_rate=1.0
     )
     
@@ -116,16 +119,15 @@ def create_cme_processing_workflow(
                 sfn.JsonPath.string_at("$.session_id")
             )
         },
-        update_expression="SET #status = :completed, processing_stage = :stage, updated_at = :timestamp",
+        # NOTE: updated_at intentionally omitted — $$.State.EnteredTime is an
+        # ISO-8601 string, and the API handler expects updated_at to be numeric.
+        update_expression="SET #status = :completed, processing_stage = :stage",
         expression_attribute_names={
             "#status": "status"
         },
         expression_attribute_values={
             ":completed": tasks.DynamoAttributeValue.from_string("completed"),
             ":stage": tasks.DynamoAttributeValue.from_string("report_generated"),
-            ":timestamp": tasks.DynamoAttributeValue.from_number(
-                sfn.JsonPath.number_at("$$.State.EnteredTime")
-            )
         },
         result_path="$.update_result"
     )
@@ -135,7 +137,10 @@ def create_cme_processing_workflow(
         scope, "HandleError",
         parameters={
             "error": "Processing failed",
-            "cause.$": "$.cause"
+            # Catch writes the error object to $.error (see result_path below),
+            # and session_id must be forwarded for MarkSessionFailed.
+            "session_id.$": "$.session_id",
+            "cause.$": "$.error.Cause"
         }
     )
     
