@@ -237,6 +237,12 @@ def test_evidence_frame_extraction_creates_timestamped_manifest(processor, monke
             manifests.append(kwargs)
 
     def _run(command, **_kwargs):
+        if '-f' in command and command[command.index('-f') + 1] == 'null':
+            class _Result:
+                returncode = 0
+
+            return _Result()
+
         pattern = Path(command[-1])
         pattern.parent.mkdir(parents=True, exist_ok=True)
         for index in range(25):
@@ -258,11 +264,15 @@ def test_evidence_frame_extraction_creates_timestamped_manifest(processor, monke
         window_start_seconds=12.0,
     )
 
-    assert evidence["sampling"] == {
+    assert {
+        key: evidence["sampling"][key]
+        for key in ("frames_per_second", "frame_interval_seconds", "frame_count")
+    } == {
         "frames_per_second": 2.0,
         "frame_interval_seconds": 0.5,
         "frame_count": 25,
     }
+    assert evidence["sampling"]["motion_bursts"]["burst_count"] == 0
     assert len(uploads) == 25
     assert all(upload["extra_args"] == {"ContentType": "image/jpeg"} for upload in uploads)
     assert uploads[0]["key"] == "cme-evidence/case_with_unsafe_chars/step_1/frames/frame_0001.jpg"
@@ -274,6 +284,96 @@ def test_evidence_frame_extraction_creates_timestamped_manifest(processor, monke
     assert manifest["sampling"]["frame_count"] == 25
     assert manifest["frames"][1]["timestamp_seconds"] == 12.5
     assert manifest["model_review"]["selection"] == "uniformly_spaced"
+
+
+def test_evidence_frame_extraction_adds_motion_burst_focus_crops(processor, monkeypatch):
+    uploads = []
+    manifests = []
+
+    class _S3:
+        def download_file(self, _bucket, _key, target):
+            Path(target).write_bytes(b"segment")
+
+        def upload_file(self, source, bucket, key, ExtraArgs=None):
+            uploads.append({
+                "source": Path(source).name,
+                "bucket": bucket,
+                "key": key,
+                "extra_args": ExtraArgs,
+            })
+
+        def put_object(self, **kwargs):
+            manifests.append(kwargs)
+
+    def _result():
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    def _write_frames(pattern, count):
+        pattern.parent.mkdir(parents=True, exist_ok=True)
+        for index in range(count):
+            (pattern.parent / f"frame_{index + 1:04d}.jpg").write_bytes(b"jpeg")
+
+    def _run(command, **_kwargs):
+        if '-filter_complex' in command:
+            for output in (value for value in command if str(value).endswith('.jpg')):
+                _write_frames(Path(output), 24)
+            return _result()
+
+        if '-f' in command and command[command.index('-f') + 1] == 'null':
+            filter_value = command[command.index('-vf') + 1]
+            metadata_path = Path(filter_value.rsplit('file=', 1)[1])
+            metadata_path.write_text(
+                'frame:0 pts:0 pts_time:0\n'
+                'lavfi.signalstats.YDIF=0\n'
+                'frame:20 pts:20 pts_time:10\n'
+                'lavfi.signalstats.YDIF=4.2\n'
+                'frame:40 pts:40 pts_time:20\n'
+                'lavfi.signalstats.YDIF=0.1\n',
+                encoding='utf-8',
+            )
+            return _result()
+
+        _write_frames(Path(command[-1]), 25)
+        return _result()
+
+    monkeypatch.setattr(processor, "s3_client", _S3())
+    monkeypatch.setattr(processor.CMEVideoProcessor, "_ffmpeg_path", lambda _self: "/opt/bin/ffmpeg")
+    monkeypatch.setattr(processor.subprocess, "run", _run)
+
+    evidence = processor.CMEVideoProcessor("bucket").extract_evidence_frames(
+        segment_s3_key="cme-segments/case/segment.mp4",
+        session_id="case",
+        declared_step_id="step_1",
+        window_start_seconds=12.0,
+    )
+
+    assert len(uploads) == 25 + (24 * 4)
+    assert all(upload["extra_args"] == {"ContentType": "image/jpeg"} for upload in uploads)
+    assert len(evidence["review_frames"]) == 20
+    review_frame_ids = {frame["frame_id"] for frame in evidence["review_frames"]}
+    assert "burst_01_frame_0013" in review_frame_ids
+    assert "burst_01_frame_0013_left_interaction_zone" in review_frame_ids
+    assert "burst_01_frame_0013_center_exam_zone" in review_frame_ids
+    assert "burst_01_frame_0013_right_interaction_zone" in review_frame_ids
+
+    manifest = json.loads(manifests[0]["Body"])
+    assert manifest["schema_version"] == "1.1"
+    assert manifest["sampling"]["motion_bursts"]["burst_count"] == 1
+    assert manifest["model_review"]["selection"] == "baseline_uniform_and_motion_focused"
+    assert manifest["model_review"]["motion_focus_frame_count"] == 4
+    burst = manifest["motion_bursts"][0]
+    assert burst["trigger_timestamp_seconds"] == 22.0
+    assert burst["start_timestamp_seconds"] == 20.5
+    assert burst["frames_per_second"] == 8.0
+    assert len(burst["frames"]) == 24
+    assert len(burst["focus_crops"]) == 72
+    assert all(
+        crop["crop_note"].startswith("Coordinate-based interaction crop")
+        for crop in burst["focus_crops"]
+    )
 
 
 def test_nova_unsupported_video_format_is_unavailable(processor, monkeypatch):

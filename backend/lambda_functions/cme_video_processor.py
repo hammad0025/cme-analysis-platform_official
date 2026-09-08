@@ -15,6 +15,7 @@ import os
 import tempfile
 import time
 import re
+import statistics
 from decimal import Decimal
 
 logger = logging.getLogger()
@@ -322,6 +323,28 @@ class CMEVideoProcessor:
     EVIDENCE_WINDOW_SECONDS = 60.0
     MAX_EVIDENCE_FRAMES = int(EVIDENCE_WINDOW_SECONDS * EVIDENCE_FRAME_RATE)
     MAX_MODEL_REVIEW_FRAMES = 20
+    MOTION_SCORE_MINIMUM = 0.6
+    MOTION_SCORE_FALLBACK_MINIMUM = 1.5
+    MOTION_SCORE_RELATIVE_MULTIPLIER = 1.5
+    MOTION_BURST_FRAME_RATE = 8.0
+    MOTION_BURST_DURATION_SECONDS = 3.0
+    MOTION_BURST_RADIUS_SECONDS = MOTION_BURST_DURATION_SECONDS / 2.0
+    MAX_MOTION_BURSTS = 3
+    MOTION_BURST_MIN_SEPARATION_SECONDS = 6.0
+    MOTION_FOCUS_CROPS = (
+        {
+            'crop_region': 'left_interaction_zone',
+            'filter': 'crop=iw*0.55:ih*0.75:0:ih*0.15',
+        },
+        {
+            'crop_region': 'center_exam_zone',
+            'filter': 'crop=iw*0.6:ih*0.7:iw*0.2:ih*0.15',
+        },
+        {
+            'crop_region': 'right_interaction_zone',
+            'filter': 'crop=iw*0.55:ih*0.75:iw*0.45:ih*0.15',
+        },
+    )
 
     def __init__(self, s3_bucket: str):
         self.s3_bucket = s3_bucket
@@ -340,17 +363,335 @@ class CMEVideoProcessor:
         return cleaned or 'unknown'
 
     @classmethod
-    def _select_model_review_frames(cls, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _select_model_review_frames(
+        cls,
+        frames: List[Dict[str, Any]],
+        max_frames: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Select a uniform, reproducible subset that fits Bedrock's image limit."""
-        if len(frames) <= cls.MAX_MODEL_REVIEW_FRAMES:
+        limit = cls.MAX_MODEL_REVIEW_FRAMES if max_frames is None else max_frames
+        if limit <= 0:
+            return []
+        if len(frames) <= limit:
             return list(frames)
+        if limit == 1:
+            return [frames[len(frames) // 2]]
 
         last_index = len(frames) - 1
         selected_indexes = {
-            round(index * last_index / (cls.MAX_MODEL_REVIEW_FRAMES - 1))
-            for index in range(cls.MAX_MODEL_REVIEW_FRAMES)
+            round(index * last_index / (limit - 1))
+            for index in range(limit)
         }
         return [frame for index, frame in enumerate(frames) if index in selected_indexes]
+
+    @staticmethod
+    def _jpeg_filenames(directory: str) -> List[str]:
+        return sorted(
+            filename
+            for filename in os.listdir(directory)
+            if filename.lower().endswith('.jpg')
+        )
+
+    @classmethod
+    def _parse_motion_scores(cls, metadata_path: str) -> List[Dict[str, float]]:
+        """Read FFmpeg signalstats output without inferring a clinical action from it."""
+        if not os.path.exists(metadata_path):
+            return []
+
+        samples = []
+        timestamp_seconds = None
+        with open(metadata_path, 'r', encoding='utf-8') as metadata_file:
+            for line in metadata_file:
+                timestamp_match = re.search(r'pts_time:([0-9.]+)', line)
+                if timestamp_match:
+                    timestamp_seconds = float(timestamp_match.group(1))
+                    continue
+
+                score_match = re.match(r'lavfi\.signalstats\.YDIF=([0-9.]+)', line.strip())
+                if score_match and timestamp_seconds is not None:
+                    samples.append({
+                        'relative_timestamp_seconds': timestamp_seconds,
+                        'motion_score': float(score_match.group(1)),
+                    })
+        return samples
+
+    @classmethod
+    def _select_motion_bursts(
+        cls,
+        motion_samples: List[Dict[str, float]],
+    ) -> List[Dict[str, Any]]:
+        """Choose distinct high-motion windows; this is sampling, not a medical conclusion."""
+        valid_samples = [
+            sample for sample in motion_samples
+            if sample.get('motion_score') is not None and sample.get('motion_score', 0.0) >= 0.0
+        ]
+        if not valid_samples:
+            return []
+
+        scores = [sample['motion_score'] for sample in valid_samples]
+        median_score = statistics.median(scores)
+        threshold = max(
+            cls.MOTION_SCORE_MINIMUM,
+            median_score * cls.MOTION_SCORE_RELATIVE_MULTIPLIER,
+        )
+        candidates = [
+            {**sample, 'selection_reason': 'above_relative_motion_threshold'}
+            for sample in valid_samples
+            if sample['motion_score'] >= threshold
+        ]
+        if not candidates:
+            strongest = max(valid_samples, key=lambda sample: sample['motion_score'])
+            if strongest['motion_score'] >= cls.MOTION_SCORE_FALLBACK_MINIMUM:
+                candidates = [{**strongest, 'selection_reason': 'sustained_motion_fallback'}]
+
+        selected = []
+        for candidate in sorted(
+            candidates,
+            key=lambda sample: (-sample['motion_score'], sample['relative_timestamp_seconds']),
+        ):
+            if any(
+                abs(candidate['relative_timestamp_seconds'] - selected_candidate['relative_timestamp_seconds'])
+                < cls.MOTION_BURST_MIN_SEPARATION_SECONDS
+                for selected_candidate in selected
+            ):
+                continue
+            selected.append(candidate)
+            if len(selected) == cls.MAX_MOTION_BURSTS:
+                break
+
+        return sorted(selected, key=lambda sample: sample['relative_timestamp_seconds'])
+
+    def _detect_motion_bursts(
+        self,
+        ffmpeg_path: str,
+        local_segment: str,
+        temp_dir: str,
+        window_duration_seconds: float,
+    ) -> List[Dict[str, Any]]:
+        metadata_path = os.path.join(temp_dir, 'motion-scores.txt')
+        motion_command = [
+            ffmpeg_path,
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-i', local_segment,
+            '-t', str(window_duration_seconds),
+            '-vf', (
+                f'fps={self.EVIDENCE_FRAME_RATE},signalstats,'
+                f'metadata=print:file={metadata_path}'
+            ),
+            '-an',
+            '-f', 'null',
+            '-',
+        ]
+        result = subprocess.run(
+            motion_command,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            logger.warning("FFmpeg motion-score extraction failed; skipping detailed motion bursts")
+            return []
+
+        return self._select_motion_bursts(self._parse_motion_scores(metadata_path))
+
+    @classmethod
+    def _select_motion_focal_frame(cls, burst: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        frames = burst.get('frames') or []
+        if not frames:
+            return None
+        trigger_timestamp = burst.get('trigger_timestamp_seconds', 0.0)
+        return min(
+            frames,
+            key=lambda frame: abs(frame['timestamp_seconds'] - trigger_timestamp),
+        )
+
+    @classmethod
+    def _select_model_review_with_motion(
+        cls,
+        baseline_frames: List[Dict[str, Any]],
+        motion_bursts: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Reserve image slots for motion-focused full frames and crops."""
+        focus_frames = []
+        for burst in motion_bursts:
+            focal_frame = cls._select_motion_focal_frame(burst)
+            if not focal_frame:
+                continue
+            focus_frames.append(focal_frame)
+            focus_frames.extend(
+                crop for crop in burst.get('focus_crops', [])
+                if crop.get('parent_frame_id') == focal_frame['frame_id']
+            )
+
+        focus_frames = focus_frames[:cls.MAX_MODEL_REVIEW_FRAMES]
+        baseline_limit = cls.MAX_MODEL_REVIEW_FRAMES - len(focus_frames)
+        review_frames = cls._select_model_review_frames(baseline_frames, baseline_limit)
+        review_frames.extend(focus_frames)
+        return sorted(
+            review_frames,
+            key=lambda frame: (
+                frame['timestamp_seconds'],
+                0 if frame.get('artifact_type') == 'baseline_frame' else 1,
+                frame['frame_id'],
+            ),
+        )
+
+    def _extract_motion_burst(
+        self,
+        ffmpeg_path: str,
+        local_segment: str,
+        temp_dir: str,
+        evidence_prefix: str,
+        burst_number: int,
+        motion_sample: Dict[str, Any],
+        window_start_seconds: float,
+        window_duration_seconds: float,
+    ) -> Optional[Dict[str, Any]]:
+        burst_id = f'burst_{burst_number:02d}'
+        trigger_relative_seconds = motion_sample['relative_timestamp_seconds']
+        burst_start_relative_seconds = max(
+            0.0,
+            min(
+                trigger_relative_seconds - self.MOTION_BURST_RADIUS_SECONDS,
+                max(0.0, window_duration_seconds - self.MOTION_BURST_DURATION_SECONDS),
+            ),
+        )
+        burst_dir = os.path.join(temp_dir, burst_id)
+        full_frames_dir = os.path.join(burst_dir, 'frames')
+        os.makedirs(full_frames_dir, exist_ok=True)
+        crop_dirs = {}
+        for crop in self.MOTION_FOCUS_CROPS:
+            crop_dir = os.path.join(burst_dir, crop['crop_region'])
+            os.makedirs(crop_dir, exist_ok=True)
+            crop_dirs[crop['crop_region']] = crop_dir
+
+        burst_frame_count = int(self.MOTION_BURST_FRAME_RATE * self.MOTION_BURST_DURATION_SECONDS)
+        source_labels = ['full'] + [crop['crop_region'] for crop in self.MOTION_FOCUS_CROPS]
+        split_labels = ''.join(f'[{label}_source]' for label in source_labels[1:])
+        filter_graph = (
+            f'[0:v]trim=start={burst_start_relative_seconds}:duration={self.MOTION_BURST_DURATION_SECONDS},'
+            f'setpts=PTS-STARTPTS,fps={self.MOTION_BURST_FRAME_RATE},'
+            f'scale=min(1600\\,iw):-2,split={len(source_labels)}[full]{split_labels};'
+            + ';'.join(
+                f'[{crop["crop_region"]}_source]{crop["filter"]}[{crop["crop_region"]}]'
+                for crop in self.MOTION_FOCUS_CROPS
+            )
+        )
+        burst_command = [
+            ffmpeg_path,
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-i', local_segment,
+            '-filter_complex', filter_graph,
+            '-map', '[full]',
+            '-frames:v', str(burst_frame_count),
+            '-q:v', '2',
+            '-y', os.path.join(full_frames_dir, 'frame_%04d.jpg'),
+        ]
+        for crop in self.MOTION_FOCUS_CROPS:
+            burst_command.extend([
+                '-map', f'[{crop["crop_region"]}]',
+                '-frames:v', str(burst_frame_count),
+                '-q:v', '2',
+                '-y', os.path.join(crop_dirs[crop['crop_region']], 'frame_%04d.jpg'),
+            ])
+
+        result = subprocess.run(
+            burst_command,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            logger.warning("FFmpeg motion-burst extraction failed for %s", burst_id)
+            return None
+
+        local_frames = self._jpeg_filenames(full_frames_dir)
+        if not local_frames:
+            logger.warning("FFmpeg motion-burst extraction produced no full frames for %s", burst_id)
+            return None
+
+        crop_filenames = {
+            crop['crop_region']: self._jpeg_filenames(crop_dirs[crop['crop_region']])
+            for crop in self.MOTION_FOCUS_CROPS
+        }
+        frames = []
+        focus_crops = []
+        for index, filename in enumerate(local_frames):
+            frame_id = f'{burst_id}_frame_{index + 1:04d}'
+            timestamp_seconds = round(
+                window_start_seconds
+                + burst_start_relative_seconds
+                + (index / self.MOTION_BURST_FRAME_RATE),
+                3,
+            )
+            s3_key = f'{evidence_prefix}/motion-bursts/{burst_id}/frames/{frame_id}.jpg'
+            s3_client.upload_file(
+                os.path.join(full_frames_dir, filename),
+                self.s3_bucket,
+                s3_key,
+                ExtraArgs={'ContentType': 'image/jpeg'},
+            )
+            frame = {
+                'frame_id': frame_id,
+                'sequence': index + 1,
+                'timestamp_seconds': timestamp_seconds,
+                'artifact_type': 'motion_burst_full_frame',
+                'burst_id': burst_id,
+                's3_key': s3_key,
+                's3_uri': f's3://{self.s3_bucket}/{s3_key}',
+            }
+            frames.append(frame)
+
+            for crop in self.MOTION_FOCUS_CROPS:
+                crop_files = crop_filenames[crop['crop_region']]
+                if index >= len(crop_files):
+                    continue
+                crop_id = f'{frame_id}_{crop["crop_region"]}'
+                crop_key = (
+                    f'{evidence_prefix}/motion-bursts/{burst_id}/crops/'
+                    f'{crop["crop_region"]}/{crop_id}.jpg'
+                )
+                s3_client.upload_file(
+                    os.path.join(crop_dirs[crop['crop_region']], crop_files[index]),
+                    self.s3_bucket,
+                    crop_key,
+                    ExtraArgs={'ContentType': 'image/jpeg'},
+                )
+                focus_crops.append({
+                    'frame_id': crop_id,
+                    'parent_frame_id': frame_id,
+                    'timestamp_seconds': timestamp_seconds,
+                    'artifact_type': 'motion_focus_crop',
+                    'burst_id': burst_id,
+                    'crop_region': crop['crop_region'],
+                    'crop_note': (
+                        'Coordinate-based interaction crop; not a detection of a hand, '
+                        'instrument, joint, or other anatomy.'
+                    ),
+                    's3_key': crop_key,
+                    's3_uri': f's3://{self.s3_bucket}/{crop_key}',
+                })
+
+        return {
+            'burst_id': burst_id,
+            'trigger_timestamp_seconds': round(
+                window_start_seconds + trigger_relative_seconds,
+                3,
+            ),
+            'trigger_relative_timestamp_seconds': round(trigger_relative_seconds, 3),
+            'motion_score': round(motion_sample['motion_score'], 5),
+            'motion_selection_reason': motion_sample['selection_reason'],
+            'start_timestamp_seconds': round(
+                window_start_seconds + burst_start_relative_seconds,
+                3,
+            ),
+            'duration_seconds': self.MOTION_BURST_DURATION_SECONDS,
+            'frames_per_second': self.MOTION_BURST_FRAME_RATE,
+            'frames': frames,
+            'focus_crops': focus_crops,
+        }
 
     def extract_video_segment(
         self,
@@ -464,11 +805,7 @@ class CMEVideoProcessor:
                     logger.error("FFmpeg evidence-frame extraction failed")
                     return None
 
-                local_frames = sorted(
-                    filename
-                    for filename in os.listdir(frames_dir)
-                    if filename.lower().endswith('.jpg')
-                )
+                local_frames = self._jpeg_filenames(frames_dir)
                 if not local_frames:
                     logger.error("FFmpeg evidence-frame extraction produced no frames")
                     return None
@@ -491,13 +828,44 @@ class CMEVideoProcessor:
                         'frame_id': frame_id,
                         'sequence': index + 1,
                         'timestamp_seconds': timestamp_seconds,
+                        'artifact_type': 'baseline_frame',
                         's3_key': s3_key,
                         's3_uri': f's3://{self.s3_bucket}/{s3_key}',
                     })
 
-                review_frames = self._select_model_review_frames(frames)
+                motion_burst_candidates = self._detect_motion_bursts(
+                    ffmpeg_path,
+                    local_segment,
+                    temp_dir,
+                    window_duration_seconds,
+                )
+                motion_bursts = []
+                for burst_number, motion_sample in enumerate(motion_burst_candidates, start=1):
+                    burst = self._extract_motion_burst(
+                        ffmpeg_path,
+                        local_segment,
+                        temp_dir,
+                        evidence_prefix,
+                        burst_number,
+                        motion_sample,
+                        window_start_seconds,
+                        window_duration_seconds,
+                    )
+                    if burst:
+                        motion_bursts.append(burst)
+
+                review_frames = (
+                    self._select_model_review_with_motion(frames, motion_bursts)
+                    if motion_bursts
+                    else self._select_model_review_frames(frames)
+                )
+                motion_focus_frame_count = sum(
+                    1
+                    for frame in review_frames
+                    if frame.get('artifact_type') != 'baseline_frame'
+                )
                 manifest = {
-                    'schema_version': '1.0',
+                    'schema_version': '1.1',
                     'source_segment_s3_key': segment_s3_key,
                     'window_start_seconds': round(window_start_seconds, 3),
                     'window_duration_seconds': round(window_duration_seconds, 3),
@@ -505,13 +873,34 @@ class CMEVideoProcessor:
                         'frames_per_second': self.EVIDENCE_FRAME_RATE,
                         'frame_interval_seconds': self.EVIDENCE_FRAME_INTERVAL_SECONDS,
                         'frame_count': len(frames),
+                        'motion_detection': {
+                            'method': 'ffmpeg_signalstats_luma_frame_difference',
+                            'sample_frames_per_second': self.EVIDENCE_FRAME_RATE,
+                            'candidate_count': len(motion_burst_candidates),
+                            'clinical_interpretation': 'none',
+                        },
+                        'motion_bursts': {
+                            'burst_count': len(motion_bursts),
+                            'frames_per_second': self.MOTION_BURST_FRAME_RATE,
+                            'duration_seconds': self.MOTION_BURST_DURATION_SECONDS,
+                            'max_bursts': self.MAX_MOTION_BURSTS,
+                            'focus_crop_regions': [
+                                crop['crop_region'] for crop in self.MOTION_FOCUS_CROPS
+                            ],
+                        },
                     },
                     'model_review': {
-                        'selection': 'uniformly_spaced',
+                        'selection': (
+                            'baseline_uniform_and_motion_focused'
+                            if motion_bursts else 'uniformly_spaced'
+                        ),
                         'frame_count': len(review_frames),
+                        'baseline_frame_count': len(review_frames) - motion_focus_frame_count,
+                        'motion_focus_frame_count': motion_focus_frame_count,
                         'frame_ids': [frame['frame_id'] for frame in review_frames],
                     },
                     'frames': frames,
+                    'motion_bursts': motion_bursts,
                 }
                 manifest_key = f'{evidence_prefix}/manifest.json'
                 s3_client.put_object(
@@ -526,6 +915,7 @@ class CMEVideoProcessor:
                     'declared_step_id': step_token,
                     'frame_count': len(frames),
                     'frames_per_second': self.EVIDENCE_FRAME_RATE,
+                    'motion_burst_count': len(motion_bursts),
                 }))
                 return {
                     'manifest_key': manifest_key,
@@ -1516,12 +1906,21 @@ def _build_video_verdict_prompt(
         )
     )
     if evidence_frames:
+        def _evidence_frame_label(frame: Dict[str, Any]) -> str:
+            if frame.get('artifact_type') != 'motion_focus_crop':
+                return ''
+            return (
+                f" ({frame.get('crop_region', 'focus_crop')}; coordinate crop only, "
+                'not an object or anatomy detection)'
+            )
+
         evidence_frame_instruction = (
-            'The attached JPEGs are a deterministic evidence sample taken at two frames per '
-            'second from this window. Cite only the frame IDs listed below when a conclusion '
-            'depends on a still image:\n'
+            'The attached JPEGs include a deterministic two-frames-per-second baseline and, '
+            'when motion was detected, an eight-frames-per-second focused burst. Cite only '
+            'the frame IDs listed below when a conclusion depends on a still image:\n'
             + '\n'.join(
                 f"- {frame['frame_id']}: {frame['timestamp_seconds']:.3f}s"
+                f"{_evidence_frame_label(frame)}"
                 for frame in evidence_frames
             )
         )
@@ -1557,6 +1956,7 @@ Rules:
 - Do not mark performed or not_observed from transcript wording alone.
 - Return analysis_unavailable when the clip, angle, resolution, timestamp, or model access prevents a reliable visual decision.
 - Mark brief only when some exam movement is visible but the action is too limited or incomplete for a full match.
+- A coordinate crop label is not proof that a hand, instrument, joint, or anatomy is visible in that crop.
 - When deterministic evidence frames are attached, cite at least one listed frame ID for every result other than analysis_unavailable.
 
 Return JSON only:
