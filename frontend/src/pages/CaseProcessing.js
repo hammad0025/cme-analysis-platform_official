@@ -7,6 +7,7 @@ import ProcessingTimeline from '../components/case/ProcessingTimeline';
 import {
   formatBytes,
   isFailedSessionStatus,
+  isReportAvailableSessionStatus,
   isTerminalSessionStatus,
   reportLabel,
   timelineStageForSession,
@@ -44,7 +45,7 @@ export default function CaseProcessing() {
         const res = await api.get(`/cme/sessions/${caseId}`);
         const s = res.data?.session || res.data || {};
         if (cancelled) return;
-        if (s.status === 'completed') {
+        if (isReportAvailableSessionStatus(s.status)) {
           navigate(`/sessions/${caseId}`, { replace: true });
           return;
         }

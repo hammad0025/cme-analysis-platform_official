@@ -734,6 +734,7 @@ def process_video_for_cme_test(
     
     # Use Bedrock for intelligent analysis (matches Dr. Hunter's methodology)
     transcript_excerpt = declared_test.get('transcript_text', '')[:200]
+    analysis_result = {}
     try:
         analysis_result = analyze_with_bedrock(
             test_type, test_timestamp, transcript_excerpt, motion_labels, person_count
@@ -748,7 +749,19 @@ def process_video_for_cme_test(
         # No guessing: without a model verdict the only honest output is
         # "we could not analyze this", never a performed/not_observed call.
         logger.error(f"Vision analysis failed for {test_type}; recording as unavailable: {e}")
+        analysis_result = {'analysis_error': 'vision_analysis_failed'}
         motion_present, pose_match, confidence = 'analysis_unavailable', 'unknown', 0.0
+
+    analysis_details = {
+        'segment_key': segment_key,
+        'test_type': test_type,
+        'motion_job_id': motion_job_id,
+        'pose_job_id': pose_job_id,
+        'motion_labels': extract_motion_labels(motion_result) if motion_result else [],
+        'person_count': count_persons(pose_result) if pose_result else 0
+    }
+    if analysis_result.get('analysis_error'):
+        analysis_details['analysis_error'] = analysis_result['analysis_error']
     
     # *** PERSIST OBSERVED ACTION TO DYNAMODB ***
     action_id = f"action_{int(time.time())}"
@@ -758,14 +771,7 @@ def process_video_for_cme_test(
         'motion_present': motion_present,
         'pose_match': pose_match,
         'confidence_score': Decimal(str(confidence)),  # Convert float to Decimal for DynamoDB
-        'analysis_details': {
-            'segment_key': segment_key,
-            'test_type': test_type,
-            'motion_job_id': motion_job_id,
-            'pose_job_id': pose_job_id,
-            'motion_labels': extract_motion_labels(motion_result) if motion_result else [],
-            'person_count': count_persons(pose_result) if pose_result else 0
-        },
+        'analysis_details': analysis_details,
         'created_at': int(time.time())
     }
     
@@ -781,7 +787,11 @@ def process_video_for_cme_test(
         'motion_present': motion_present,
         'pose_match': pose_match,
         'confidence': confidence,
-        'status': 'completed'
+        'status': (
+            'analysis_unavailable'
+            if motion_present in ('analysis_unavailable', 'unknown')
+            else 'completed'
+        )
     }
 
 
@@ -1604,13 +1614,21 @@ def handler(event, context):
         
         motion_status = result.get('motion_present', 'unknown')
         confidence = result.get('confidence', 0.0)
-        logger.info(f"[Dr. Hunter Analysis] ✅ Completed: {test_label} → {motion_status} (confidence: {confidence:.2f})")
+        if motion_status in ('analysis_unavailable', 'unknown'):
+            logger.warning(
+                f"[Dr. Hunter Analysis] Vision unavailable: {test_label} → "
+                f"{motion_status} (confidence: {confidence:.2f}); no performed/not_observed verdict"
+            )
+        else:
+            logger.info(f"[Dr. Hunter Analysis] ✅ Completed: {test_label} → {motion_status} (confidence: {confidence:.2f})")
         
         # Log summary for tracking
         if motion_status == 'performed':
             logger.info(f"  ✓ Test PERFORMED - matches video evidence")
         elif motion_status == 'brief':
             logger.info(f"  ⚠ Test BRIEF/PARTIAL - limited evidence")
+        elif motion_status in ('analysis_unavailable', 'unknown'):
+            logger.warning("  ⚠ Test NOT ANALYZED - vision processing unavailable")
         else:
             logger.info(f"  ✗ Test NOT OBSERVED - discrepancy detected!")
         
@@ -1629,4 +1647,3 @@ def handler(event, context):
             'error': str(e),
             'traceback': traceback.format_exc()
         }
-

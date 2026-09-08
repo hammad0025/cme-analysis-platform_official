@@ -24,10 +24,13 @@ export const STATUS_CONFIG = {
   uploading: { label: 'Uploading', tone: 'indigo', pulse: true },
   processing: { label: 'Processing', tone: 'purple', pulse: true },
   completed: { label: 'Completed', tone: 'emerald', pulse: false },
+  completed_with_warnings: { label: 'Review Needed', tone: 'amber', pulse: false },
   cancelled: { label: 'Cancelled', tone: 'rose', pulse: false },
   failed: { label: 'Failed', tone: 'rose', pulse: false },
   error: { label: 'Error', tone: 'rose', pulse: false },
 };
+
+const REPORT_AVAILABLE_STATUSES = new Set(['completed', 'completed_with_warnings']);
 
 // Maps backend processing_stage values onto the visible pipeline timeline.
 // Pipeline order: ingestion → transcription → nlp (transcript analysis) →
@@ -45,17 +48,21 @@ const PROCESSING_STAGE_TO_TIMELINE = {
   video_analysis: 'vision',
   report_generation: 'report',
   report_generated: 'report',
+  analysis_incomplete: 'report',
 };
 
 export const isFailedSessionStatus = (status) =>
   ['error', 'failed', 'cancelled'].includes(String(status || '').toLowerCase());
 
+export const isReportAvailableSessionStatus = (status) =>
+  REPORT_AVAILABLE_STATUSES.has(String(status || '').toLowerCase());
+
 export const isTerminalSessionStatus = (status) =>
-  isFailedSessionStatus(status) || String(status || '').toLowerCase() === 'completed';
+  isFailedSessionStatus(status) || isReportAvailableSessionStatus(status);
 
 export function timelineStageForSession(session) {
   const status = String(session?.status || '').toLowerCase();
-  if (status === 'completed') return 'report';
+  if (isReportAvailableSessionStatus(status)) return 'report';
   const stage = String(session?.processing_stage || '').toLowerCase();
   if (stage.startsWith('transcription_failed')) return 'transcription';
   if (stage === 'conversion_failed') return 'ingestion';

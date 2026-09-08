@@ -33,6 +33,8 @@ _REPORT_NOISE_RE = re.compile(
     re.I,
 )
 
+_UNANALYZED_MOTION_STATUSES = {'analysis_unavailable', 'unknown', None}
+
 
 def _is_noise_flag(flag: Dict[str, Any]) -> bool:
     """True when a demeanor flag is administrative/transcription noise."""
@@ -41,6 +43,22 @@ def _is_noise_flag(flag: Dict[str, Any]) -> bool:
         for k in ("flag_type", "description", "transcript_excerpt")
     )
     return bool(_REPORT_NOISE_RE.search(text))
+
+
+def _analysis_completion_summary(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize whether declared tests received a real video verdict."""
+    declared_steps = data.get('declared_steps') or []
+    step_actions = data.get('step_actions') or {}
+    tests_unanalyzed = sum(
+        1 for step in declared_steps
+        if step_actions.get(step.get('declared_step_id'), {}).get('motion_present')
+        in _UNANALYZED_MOTION_STATUSES
+    )
+    return {
+        'analysis_status': 'incomplete' if tests_unanalyzed else 'complete',
+        'tests_unanalyzed': tests_unanalyzed,
+        'total_declared_tests': len(declared_steps),
+    }
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
@@ -294,6 +312,8 @@ class CMEReportGenerator:
             if not report_data:
                 return {'error': 'Session not found or incomplete'}
             
+            analysis_summary = _analysis_completion_summary(report_data)
+
             # Generate report based on format
             if format == 'html':
                 report_content = self._generate_html_report(report_data, include_video_links)
@@ -343,7 +363,8 @@ class CMEReportGenerator:
                 'report_key': report_key,
                 'download_url': download_url,
                 'format': format,
-                'generated_at': datetime.now().isoformat()
+                'generated_at': datetime.now().isoformat(),
+                **analysis_summary,
             }
             
         except Exception as e:
@@ -640,11 +661,8 @@ class CMEReportGenerator:
         # Tests the vision model could not judge. These are NOT discrepancies:
         # they must never be counted as "not performed" or presented as
         # evidence against the examiner.
-        tests_unanalyzed = sum(
-            1 for step in declared_steps
-            if step_actions.get(step['declared_step_id'], {}).get('motion_present')
-            in ('analysis_unavailable', 'unknown', None)
-        )
+        analysis_summary = _analysis_completion_summary(data)
+        tests_unanalyzed = analysis_summary['tests_unanalyzed']
         incomplete_banner = ""
         if tests_unanalyzed:
             incomplete_banner = f"""
@@ -1180,25 +1198,53 @@ class CMEReportGenerator:
             return {'error': str(e)}
 
 
-def _update_session_after_report(session_id: str, *, success: bool, report_key: str = '', error: str = '') -> None:
+def _update_session_after_report(
+    session_id: str,
+    *,
+    success: bool,
+    report_key: str = '',
+    error: str = '',
+    analysis_status: str = 'complete',
+    tests_unanalyzed: int = 0,
+    total_declared_tests: int = 0,
+) -> None:
     """Reflect report generation outcome on the session record so the UI
     never shows 'completed' without a report or 'processing' forever."""
     import time as _time
     try:
         sessions_table = dynamodb.Table(os.environ.get('CME_SESSIONS_TABLE', 'cme-sessions'))
         if success:
+            tests_unanalyzed = int(tests_unanalyzed or 0)
+            total_declared_tests = int(total_declared_tests or 0)
+            has_unanalyzed_tests = analysis_status == 'incomplete' or tests_unanalyzed > 0
+            status = 'completed_with_warnings' if has_unanalyzed_tests else 'completed'
+            stage = 'analysis_incomplete' if has_unanalyzed_tests else 'report_generated'
+            warning = ''
+            if has_unanalyzed_tests:
+                warning = (
+                    f"Vision analysis did not run for {tests_unanalyzed} of "
+                    f"{total_declared_tests} declared test(s)."
+                )
             sessions_table.update_item(
                 Key={'session_id': session_id},
                 UpdateExpression=(
                     'SET #status = :status, processing_stage = :stage, '
-                    'report_key = :key, updated_at = :updated'
+                    'report_key = :key, updated_at = :updated, '
+                    'analysis_status = :analysis_status, '
+                    'tests_unanalyzed = :tests_unanalyzed, '
+                    'total_declared_tests = :total_declared_tests, '
+                    'analysis_warning = :analysis_warning'
                 ),
                 ExpressionAttributeNames={'#status': 'status'},
                 ExpressionAttributeValues={
-                    ':status': 'completed',
-                    ':stage': 'report_generated',
+                    ':status': status,
+                    ':stage': stage,
                     ':key': report_key,
                     ':updated': int(_time.time()),
+                    ':analysis_status': analysis_status,
+                    ':tests_unanalyzed': tests_unanalyzed,
+                    ':total_declared_tests': total_declared_tests,
+                    ':analysis_warning': warning,
                 },
             )
         else:
@@ -1255,7 +1301,12 @@ def generate_report(event, context):
             raise RuntimeError(f"Report generation failed: {result['error']}")
         
         _update_session_after_report(
-            session_id, success=True, report_key=str(result.get('report_key') or '')
+            session_id,
+            success=True,
+            report_key=str(result.get('report_key') or ''),
+            analysis_status=str(result.get('analysis_status') or 'complete'),
+            tests_unanalyzed=int(result.get('tests_unanalyzed') or 0),
+            total_declared_tests=int(result.get('total_declared_tests') or 0),
         )
         return {
             'statusCode': 200,
@@ -1273,4 +1324,3 @@ def generate_report(event, context):
 
 # Import os for environment variables
 import os
-

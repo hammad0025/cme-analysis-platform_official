@@ -1,3 +1,5 @@
+import { isReportAvailableSessionStatus } from './caseConstants';
+
 /** Normalize artifact URL keys from GET /cme/sessions/{id} for UI consumption. */
 export function resolveArtifactUrls(session) {
   const raw = session?.artifact_urls || {};
@@ -28,7 +30,7 @@ export function resolveArtifactUrls(session) {
 }
 
 export function hasLinkedAnalysis(session) {
-  if (!session || session.status !== 'completed') return false;
+  if (!session || !isReportAvailableSessionStatus(session.status)) return false;
   const urls = resolveArtifactUrls(session);
   if (session.analysis_summary) return true;
   if (session.metadata?.linked_local_run || session.metadata?.is_backfilled) return true;

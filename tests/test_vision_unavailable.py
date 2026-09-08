@@ -6,6 +6,7 @@ examiner skipped a test -- for any recording whose clock differed. These
 tests lock in the honest behavior.
 """
 import importlib.util
+import logging
 import sys
 import types
 from pathlib import Path
@@ -77,3 +78,94 @@ def test_case_specific_heuristic_is_marked_deprecated(processor):
     doc = processor.use_fast_heuristic.__doc__ or ""
     assert "DEPRECATED" in doc
     assert "907-1661" in doc, "the doc must name the hardcoded window it assumed"
+
+
+def test_process_result_marks_unavailable_status(processor, monkeypatch):
+    saved_boto3 = sys.modules.get("boto3")
+    persisted = {}
+
+    class _Table:
+        def put_item(self, Item):
+            persisted["item"] = Item
+
+    class _Dynamo:
+        def Table(self, _name):
+            return _Table()
+
+    boto3_stub = types.ModuleType("boto3")
+    boto3_stub.resource = lambda *a, **k: _Dynamo()
+    monkeypatch.setitem(sys.modules, "boto3", boto3_stub)
+
+    class _Processor:
+        def __init__(self, _bucket):
+            pass
+
+        def extract_video_segment(self, **_kwargs):
+            return None
+
+        def analyze_video_segment(self, *_args, **_kwargs):
+            return {"motion_detected": {}, "poses_detected": {}}
+
+    monkeypatch.setattr(processor, "CMEVideoProcessor", _Processor)
+    monkeypatch.setattr(
+        processor,
+        "analyze_with_bedrock",
+        lambda *_args, **_kwargs: {
+            "motion_present": "analysis_unavailable",
+            "pose_match": "unknown",
+            "confidence": 0.0,
+            "analysis_error": "vision_model_unavailable",
+        },
+    )
+
+    try:
+        result = processor.process_video_for_cme_test(
+            session_id="cme_test",
+            declared_test={
+                "label": "manual_muscle_testing",
+                "timestamp": 42.0,
+                "declared_step_id": "step_1",
+                "transcript_text": "squeeze my fingers",
+            },
+            video_s3_key="input.mp4",
+            s3_bucket="bucket",
+        )
+    finally:
+        if saved_boto3 is not None:
+            monkeypatch.setitem(sys.modules, "boto3", saved_boto3)
+
+    assert result["motion_present"] == "analysis_unavailable"
+    assert result["status"] == "analysis_unavailable"
+    assert persisted["item"]["analysis_details"]["analysis_error"] == "vision_model_unavailable"
+
+
+def test_handler_logs_unavailable_without_discrepancy(processor, monkeypatch, caplog):
+    monkeypatch.setattr(
+        processor,
+        "process_video_for_cme_test",
+        lambda **_kwargs: {
+            "session_id": "cme_test",
+            "test_type": "manual_muscle_testing",
+            "timestamp": 42.0,
+            "segment_key": "input.mp4",
+            "action_id": "action_1",
+            "motion_present": "analysis_unavailable",
+            "pose_match": "unknown",
+            "confidence": 0.0,
+            "status": "analysis_unavailable",
+        },
+    )
+
+    caplog.set_level(logging.INFO)
+    result = processor.handler(
+        {
+            "session_id": "cme_test",
+            "declared_test": {"label": "manual_muscle_testing", "timestamp": 42.0},
+            "video_s3_key": "input.mp4",
+        },
+        None,
+    )
+
+    assert result["statusCode"] == 200
+    assert "Test NOT ANALYZED" in caplog.text
+    assert "Test NOT OBSERVED" not in caplog.text

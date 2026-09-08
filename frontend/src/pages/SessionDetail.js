@@ -10,6 +10,7 @@ import ThreeWayTestIndex from '../components/case/ThreeWayTestIndex';
 import { useSessionPdfUrl } from '../hooks/useSessionPdfUrl';
 import api from '../services/cmeApi';
 import { inferContentType } from '../services/casesService';
+import { isReportAvailableSessionStatus } from '../lib/caseConstants';
 import {
   analysisMetrics,
   doctorReportLabel,
@@ -137,19 +138,20 @@ export default function SessionDetail() {
   }, [sessionStatus, loadSession]);
 
   const isTerminalFailure = ['cancelled', 'failed', 'error'].includes(session?.status);
+  const reportAvailable = isReportAvailableSessionStatus(session?.status);
   const linkedAnalysis = session ? hasLinkedAnalysis(session) : false;
   const artifactUrls = session ? resolveArtifactUrls(session) : {};
 
   useEffect(() => {
     if (!session || defaultTabApplied.current) return;
-    if (session.status === 'completed' && hasLinkedAnalysis(session)) {
+    if (isReportAvailableSessionStatus(session.status) && hasLinkedAnalysis(session)) {
       setActiveTab('tests');
     }
     defaultTabApplied.current = true;
   }, [session]);
   const metrics = session ? analysisMetrics(session) : null;
   const { pdfUrl, loading: pdfLoading, error: pdfError } = useSessionPdfUrl(sessionId, artifactUrls);
-  const showPdfReport = session?.status === 'completed' && (pdfUrl || pdfLoading || linkedAnalysis);
+  const showPdfReport = reportAvailable && (pdfUrl || pdfLoading || linkedAnalysis);
 
   const onUploadReport = async (file) => {
     setUploading(true);
@@ -470,7 +472,8 @@ export default function SessionDetail() {
 function OverviewTab({ session, metrics, linkedAnalysis, artifactUrls, hasRecordings, canEdit, onGoToTab, pdfUrl, pdfLoading, pdfError }) {
   const dr = session.doctor_report;
   const recordingCount = session.recordings?.length || (session.video_uri ? 1 : linkedAnalysis ? 1 : 0);
-  const showPdf = session.status === 'completed' && (pdfUrl || pdfLoading);
+  const reportAvailable = isReportAvailableSessionStatus(session.status);
+  const showPdf = reportAvailable && (pdfUrl || pdfLoading);
 
   return (
     <div className="space-y-6">
@@ -519,7 +522,7 @@ function OverviewTab({ session, metrics, linkedAnalysis, artifactUrls, hasRecord
         {[
           { id: 'overview', label: 'Overview', sub: 'You are here', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
           { id: 'tests', label: 'Main issues', sub: linkedAnalysis ? 'Key discrepancies' : 'After analysis', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
-          { id: 'analysis', label: 'Analysis', sub: session.status === 'completed' ? 'View findings' : 'After processing', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+          { id: 'analysis', label: 'Analysis', sub: reportAvailable ? 'View findings' : 'After processing', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
           { id: 'timeline', label: 'Timeline', sub: 'Chronology', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
           { id: 'recording', label: 'Materials', sub: `${recordingCount} video(s)`, icon: 'M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z' },
         ].map((card) => (
@@ -693,7 +696,7 @@ function PendingPanel({ status, title, body }) {
 }
 
 function AnalysisTab({ session, sessionId, artifactUrls, linkedAnalysis, pdfUrl, pdfLoading, pdfError }) {
-  if (session.status !== 'completed') {
+  if (!isReportAvailableSessionStatus(session.status)) {
     const isProcessing = session.status === 'processing';
     const isTerminal = ['cancelled', 'failed', 'error'].includes(session.status);
     return (
@@ -915,7 +918,7 @@ function TestsTab({ session, sessionId, artifactUrls, linkedAnalysis, initialSee
     return () => { cancelled = true; };
   }, [artifactUrls, sessionId, linkedAnalysis]);
 
-  if (!linkedAnalysis && session.status !== 'completed') {
+  if (!linkedAnalysis && !isReportAvailableSessionStatus(session.status)) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
         <h3 className="text-base font-semibold text-slate-900 mb-2">Report vs video available after analysis</h3>
@@ -1168,7 +1171,7 @@ function TimelineTab({ session, artifactUrls, linkedAnalysis, pdfUrl, pdfLoading
       </div>
     );
   }
-  if (session.status !== 'completed') {
+  if (!isReportAvailableSessionStatus(session.status)) {
     const isProcessing = session.status === 'processing';
     const isTerminal = ['cancelled', 'failed', 'error'].includes(session.status);
     return (
@@ -1562,4 +1565,3 @@ function InfoCard({ title, icon, items }) {
     </div>
   );
 }
-

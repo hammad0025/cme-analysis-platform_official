@@ -11,6 +11,7 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_iam as iam,
+    aws_dynamodb as dynamodb,
 )
 from constructs import Construct
 
@@ -31,12 +32,14 @@ def create_cme_processing_workflow(
     2. Wait for Transcription to Complete
     3. Run NLP Analysis (test detection + demeanor)
     4. Map over each detected test → Extract video segment + Analyze
-    5. Generate Report
-    6. Update Session Status
+    5. Generate Report and update session status
     """
     
     # Step 1: Start Transcription Job (already done by API handler)
     # This workflow starts AFTER transcription job is initiated
+    sessions_table = dynamodb.Table.from_table_name(
+        scope, "CMESessionsWorkflowTable", sessions_table_name
+    )
     
     # Step 2: Wait for Transcription Job to Complete
     wait_for_transcription = tasks.LambdaInvoke(
@@ -110,28 +113,6 @@ def create_cme_processing_workflow(
         result_path="$.report_result"
     )
     
-    # Step 6: Update Session Status to Completed
-    update_status = tasks.DynamoUpdateItem(
-        scope, "UpdateSessionStatus",
-        table_name=sessions_table_name,
-        key={
-            "session_id": tasks.DynamoAttributeValue.from_string(
-                sfn.JsonPath.string_at("$.session_id")
-            )
-        },
-        # NOTE: updated_at intentionally omitted — $$.State.EnteredTime is an
-        # ISO-8601 string, and the API handler expects updated_at to be numeric.
-        update_expression="SET #status = :completed, processing_stage = :stage",
-        expression_attribute_names={
-            "#status": "status"
-        },
-        expression_attribute_values={
-            ":completed": tasks.DynamoAttributeValue.from_string("completed"),
-            ":stage": tasks.DynamoAttributeValue.from_string("report_generated"),
-        },
-        result_path="$.update_result"
-    )
-    
     # Error handling state
     handle_error = sfn.Pass(
         scope, "HandleError",
@@ -147,7 +128,7 @@ def create_cme_processing_workflow(
     # Update status to error on failure
     mark_as_failed = tasks.DynamoUpdateItem(
         scope, "MarkSessionFailed",
-        table_name=sessions_table_name,
+        table=sessions_table,
         key={
             "session_id": tasks.DynamoAttributeValue.from_string(
                 sfn.JsonPath.string_at("$.session_id")
@@ -169,15 +150,16 @@ def create_cme_processing_workflow(
         .next(run_nlp_analysis)
         .next(process_all_tests)
         .next(generate_report)
-        .next(update_status)
     )
     
     # Add error handling
-    definition.add_catch(
-        handle_error.next(mark_as_failed),
-        errors=["States.ALL"],
-        result_path="$.error"
-    )
+    failure_chain = handle_error.next(mark_as_failed)
+    for state in (wait_for_transcription, run_nlp_analysis, process_all_tests, generate_report):
+        state.add_catch(
+            failure_chain,
+            errors=["States.ALL"],
+            result_path="$.error"
+        )
     
     # Create the state machine
     state_machine = sfn.StateMachine(
@@ -238,6 +220,3 @@ def create_s3_upload_trigger(
         s3n.LambdaDestination(trigger_lambda),
         s3.NotificationKeyFilter(prefix="cme-recordings/")
     )
-
-
-

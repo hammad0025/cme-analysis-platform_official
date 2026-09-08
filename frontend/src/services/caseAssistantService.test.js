@@ -125,4 +125,17 @@ describe('caseAssistantService', () => {
     });
     expect(answer).toContain('Report vs video');
   });
+
+  test('answerQuestion explains warning-complete sessions', async () => {
+    const { answer } = await answerQuestion('When will the report be ready?', {
+      contextType: CONTEXT_TYPES.SESSION,
+      session: {
+        status: 'completed_with_warnings',
+        patient_name: 'Wendy Scammon',
+        analysis_warning: 'Vision analysis did not run for 2 of 3 declared test(s).',
+      },
+    });
+    expect(answer).toContain('generated a report');
+    expect(answer).toContain('2 of 3');
+  });
 });

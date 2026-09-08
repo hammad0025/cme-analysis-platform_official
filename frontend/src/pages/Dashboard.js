@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import Button from '../components/Button';
 import StatusBadge from '../components/case/StatusBadge';
 import { caseDetailPath } from '../lib/caseRoutes';
+import { isReportAvailableSessionStatus } from '../lib/caseConstants';
 import { listCases, isMockMode } from '../services/casesService';
 
 export default function Dashboard() {
@@ -33,7 +34,7 @@ export default function Dashboard() {
   const stats = useMemo(() => ({
     total: cases.length,
     processing: cases.filter((c) => ['processing', 'uploading', 'recording_uploaded'].includes(c.status)).length,
-    completed: cases.filter((c) => c.status === 'completed').length,
+    completed: cases.filter((c) => isReportAvailableSessionStatus(c.status)).length,
   }), [cases]);
 
   const sourceLabel = {

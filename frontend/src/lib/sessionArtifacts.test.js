@@ -23,6 +23,16 @@ describe('sessionArtifacts', () => {
     expect(hasLinkedAnalysis({ status: 'processing' })).toBe(false);
   });
 
+  it('detects linked analysis on warning-complete sessions', () => {
+    expect(
+      hasLinkedAnalysis({
+        ...sampleSession,
+        status: 'completed_with_warnings',
+        analysis_summary: null,
+      }),
+    ).toBe(true);
+  });
+
   it('normalizes nested API response', () => {
     const normalized = normalizeSession({ session: sampleSession });
     expect(normalized.artifact_urls.standard_report_html).toBe('https://example.com/report.html');

@@ -4,7 +4,11 @@
  */
 import api from './cmeApi';
 import { getMockCase, isMockMode } from './casesService';
-import { STATUS_CONFIG, REPORT_TYPES } from '../lib/caseConstants';
+import {
+  isReportAvailableSessionStatus,
+  STATUS_CONFIG,
+  REPORT_TYPES,
+} from '../lib/caseConstants';
 
 const SAMPLE_BASE = '/sample-case';
 
@@ -363,6 +367,7 @@ function answerSession(text, ctx) {
   }
 
   const status = session.status || 'created';
+  const reportAvailable = isReportAvailableSessionStatus(status);
   const plaintiff = session.patient_name || session.plaintiff_name || 'Unknown';
   const examiner = session.doctor_name || session.examiner_name || 'Unknown';
 
@@ -376,7 +381,7 @@ function answerSession(text, ctx) {
   }
   if (scoreIntent(text, ['orthopedic', 'ortho', 'neurologic', 'test index', 'hoffmann', 'babinski', 'romberg']) >= 1
       || (scoreIntent(text, ['test', 'tests']) >= 1 && !includesAny(text, ['cost', 'price']))) {
-    if (session.status === 'completed') {
+    if (reportAvailable) {
       return 'Open the **Report vs video** tab on this session for the deposition crosswalk. Click any row to seek the deposition video to that timestamp. Rows show report claims, named tests (Hoffmann, Babinski, Romberg, cervical ROM planes), and technique verdicts.';
     }
     return 'The **Report vs video** tab will populate after analysis completes, with click-to-seek deposition timestamps and three-way claim reconciliation.';
@@ -385,7 +390,10 @@ function answerSession(text, ctx) {
     return `Session status: **${statusLabel(status)}**. Patient: **${plaintiff}**; examiner: **${examiner}**; exam date: ${session.exam_date || 'TBD'}.`;
   }
   if (scoreIntent(text, ['when', 'ready', 'eta', 'report']) >= 1) {
-    if (status === 'completed') {
+    if (status === 'completed_with_warnings') {
+      return `This session generated a report but needs review because some video analysis did not complete. ${session.analysis_warning || 'Open the report and warning banner before relying on it.'}`;
+    }
+    if (reportAvailable) {
       return `This session is **complete**. Download the standard report, behavior dashboard, and analysis artifacts from the session detail tabs.`;
     }
     if (status === 'processing') {
@@ -409,9 +417,9 @@ function answerSession(text, ctx) {
       : `Materials are locked once processing begins. Current status: **${statusLabel(status)}**.`;
   }
   if (scoreIntent(text, ['download', 'report', 'artifact']) >= 1) {
-    return status === 'completed'
-      ? 'Completed sessions expose the **Overview**, **Standard Report**, **Behavior Dashboard**, and raw analysis JSON for download or review.'
-      : `Reports become available when status is **Completed** (currently **${statusLabel(status)}**).`;
+    return reportAvailable
+      ? 'Report-ready sessions expose the **Overview**, **Standard Report**, **Behavior Dashboard**, and raw analysis JSON for download or review.'
+      : `Reports become available when status is **Completed** or **Review Needed** (currently **${statusLabel(status)}**).`;
   }
   return null;
 }
