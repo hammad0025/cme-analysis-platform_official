@@ -1297,6 +1297,28 @@ def _normalize_video_verdict(analysis: Dict[str, Any], model_id: str) -> Dict[st
     }
 
 
+def _hunter_reference_context_for_video(test_type: str, transcript_excerpt: str) -> str:
+    """Retrieve compact Hunter standards for the declared video test."""
+    try:
+        from .cme_hunter_reference_search import hunter_reference_context_for_claim
+    except ImportError:
+        try:
+            from cme_hunter_reference_search import hunter_reference_context_for_claim  # type: ignore
+        except ImportError:
+            return ""
+
+    try:
+        return hunter_reference_context_for_claim(
+            test_type,
+            transcript_excerpt,
+            test_name=test_type.replace('_', ' '),
+            max_results=3,
+            max_chars=2200,
+        )
+    except Exception:
+        return ""
+
+
 def _build_video_verdict_prompt(
     test_type: str,
     test_timestamp: float,
@@ -1307,6 +1329,7 @@ def _build_video_verdict_prompt(
 ) -> str:
     expectations = TEST_MOTION_EXPECTATIONS.get(test_type, {})
     expected_movements = expectations.get('expected_movements', [])
+    hunter_context = _hunter_reference_context_for_video(test_type, transcript_excerpt)
     timing_instruction = (
         'The attached video is the extracted test window, so evaluate the visible activity in this clip.'
         if video_is_segment
@@ -1330,10 +1353,14 @@ Examiner touch required: {expectations.get('examiner_touch', 'unknown')}
 Auxiliary motion labels: {', '.join(motion_labels[:10]) if motion_labels else 'none'}
 Detected person count from auxiliary tools: {person_count}
 
+Hunter reference context:
+{hunter_context or 'No specific Hunter corpus references were retrieved for this test.'}
+
 {timing_instruction}
 
 Rules:
 - Use the video evidence as the source of truth.
+- Use Hunter references as technique standards only; do not treat them as proof that this exam action happened.
 - Do not mark performed or not_observed from transcript wording alone.
 - Return analysis_unavailable when the clip, angle, resolution, timestamp, or model access prevents a reliable visual decision.
 - Mark brief only when some exam movement is visible but the action is too limited or incomplete for a full match.

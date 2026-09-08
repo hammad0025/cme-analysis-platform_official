@@ -163,6 +163,10 @@ def hunter_methodology_context_for_claim(claim_id: str, claim_text: str) -> str:
     from .cme_defense_playbook import standard_of_care_context_for_claim
     from .cme_exam_knowledge_base import get_exam_by_name
     from .cme_hunter_methodology import TEST_PERFORMANCE_INDICATORS
+    try:
+        from .cme_hunter_reference_search import hunter_reference_context_for_claim
+    except ImportError:
+        from cme_hunter_reference_search import hunter_reference_context_for_claim  # type: ignore
 
     cid = (claim_id or "").strip().lower()
     keys = list(_CLAIM_HUNTER_KB_KEYS.get(cid, []))
@@ -207,11 +211,24 @@ def hunter_methodology_context_for_claim(claim_id: str, claim_text: str) -> str:
         + standard_of_care_context_for_claim(claim_id, claim_text)
         + ama_rom_context_for_claim(claim_id, claim_text)
     )
-    if not lines:
-        return ""
-    return "HUNTER / EXAM STANDARDS (use to judge technique; video evidence still controls verdict):\n" + "\n".join(
-        f"- {p}" for p in lines
-    )
+    standards_context = ""
+    if lines:
+        standards_context = (
+            "HUNTER / EXAM STANDARDS (use to judge technique; video evidence still controls verdict):\n"
+            + "\n".join(f"- {p}" for p in lines)
+        )
+
+    try:
+        corpus_context = hunter_reference_context_for_claim(
+            claim_id,
+            claim_text,
+            max_results=3,
+            max_chars=2200,
+        )
+    except Exception:
+        corpus_context = ""
+
+    return "\n\n".join(part for part in (standards_context, corpus_context) if part)
 
 
 def _expand_claim_keywords(claim_id: str, claim_text: str) -> List[str]:
