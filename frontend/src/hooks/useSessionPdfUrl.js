@@ -42,7 +42,7 @@ export function useSessionPdfUrl(sessionId, artifactUrls) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, direct]);
+  }, [sessionId, direct, artifactUrls]);
 
   return { pdfUrl, loading, error };
 }

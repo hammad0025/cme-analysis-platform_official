@@ -249,13 +249,8 @@ function answerSample(text, ctx) {
   if (scoreIntent(text, ['orthopedic', 'ortho', 'neurologic', 'hoffmann', 'babinski', 'romberg', 'test index', 'test ledger']) >= 1
       || (scoreIntent(text, ['test', 'tests', 'performed']) >= 1 && !includesAny(text, ['cost', 'price', 'examiner', 'doctor']))) {
     if (testLedger?.events?.length) {
-      const ortho = testLedger.events.filter((e) => e.category === 'orthopedic_neurologic');
       const observed = testLedger.events.filter((e) => e.observed_on_video);
       const claimOnly = testLedger.events.filter((e) => e.three_way_status === 'claimed_not_observed');
-      const notReported = testLedger.events.filter((e) => e.three_way_status === 'observed_not_reported');
-      const top = observed.slice(0, 6).map(
-        (e) => `• **${e.test_name}**${e.start_sec != null ? ` at ${e.start_sec}s` : ''} — ${e.technique_verdict}`,
-      );
       return `The **Report vs video** tab lists statements from the doctor's written report checked against the deposition recording. `
         + `${observed.length} with video timestamps; ${claimOnly.length} in report but not seen on video.\n\n`
         + `Open **Report vs video** and click a timestamp to jump to that moment in the recording.`;
