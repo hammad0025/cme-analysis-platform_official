@@ -408,7 +408,6 @@ class CMEAnalysisPlatformStack(Stack):
 
         # Wire orchestration ARN into API handler (created above; token resolves at deploy)
         api_lambda.add_environment("STEP_FUNCTION_ARN", state_machine.state_machine_arn)
-        nlp_lambda.grant_invoke(api_lambda)
         
         # ========== Outputs ==========
         self.api_url = api.url
