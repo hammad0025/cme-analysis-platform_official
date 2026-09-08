@@ -3,7 +3,18 @@ AWS CDK Infrastructure Stack for CME Analysis Platform
 Deploys all required AWS resources for the Florida happy-path implementation
 """
 
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+import jsii
 from aws_cdk import (
+    BundlingOptions,
+    ILocalBundling,
+    Size,
     Stack,
     Duration,
     aws_lambda as lambda_,
@@ -21,6 +32,69 @@ from aws_cdk import (
     RemovalPolicy,
 )
 from constructs import Construct
+
+
+@jsii.implements(ILocalBundling)
+class FFmpegLayerLocalBundling:
+    """Build the Linux ARM FFmpeg layer without requiring a local Docker daemon."""
+
+    IMAGEIO_FFMPEG_REQUIREMENT = "imageio-ffmpeg==0.6.0"
+    IMAGEIO_FFMPEG_WHEEL_SHA256 = "1d47bebd83d2c5fc770720d211855f208af8a596c82d17730aa51e815cdee6dc"
+
+    def try_bundle(self, output_dir: str, _options: BundlingOptions) -> bool:
+        with tempfile.TemporaryDirectory(prefix="cme-ffmpeg-layer-") as temp_dir:
+            temp_path = Path(temp_dir)
+            requirements_path = temp_path / "requirements.txt"
+            requirements_path.write_text(
+                f"{self.IMAGEIO_FFMPEG_REQUIREMENT} \\\n"
+                f"    --hash=sha256:{self.IMAGEIO_FFMPEG_WHEEL_SHA256}\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "download",
+                    "--disable-pip-version-check",
+                    "--no-deps",
+                    "--only-binary=:all:",
+                    "--require-hashes",
+                    "--platform",
+                    "manylinux2014_aarch64",
+                    "--python-version",
+                    "3.11",
+                    "--implementation",
+                    "cp",
+                    "--abi",
+                    "cp311",
+                    "--dest",
+                    temp_dir,
+                    "--requirement",
+                    str(requirements_path),
+                ],
+                check=True,
+            )
+            wheel = next(temp_path.glob("imageio_ffmpeg-*.whl"), None)
+            if wheel is None:
+                raise RuntimeError("FFmpeg layer wheel download produced no package")
+
+            extracted_dir = temp_path / "wheel"
+            with zipfile.ZipFile(wheel) as archive:
+                archive.extractall(extracted_dir)
+            binary = next(
+                extracted_dir.glob("imageio_ffmpeg/binaries/ffmpeg-linux-aarch64-*"),
+                None,
+            )
+            if binary is None:
+                raise RuntimeError("FFmpeg layer wheel did not contain a Linux ARM binary")
+
+            target = Path(output_dir) / "bin" / "ffmpeg"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(binary, target)
+            target.chmod(0o755)
+        return True
+
 
 class CMEAnalysisPlatformStack(Stack):
     """Complete infrastructure stack for CME Analysis Platform"""
@@ -288,17 +362,34 @@ class CMEAnalysisPlatformStack(Stack):
             }
         )
 
+        ffmpeg_layer = lambda_.LayerVersion(
+            self,
+            "CMEFFmpegLayer",
+            description="FFmpeg 7.0.2 for deterministic CME visual-evidence extraction",
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_11],
+            compatible_architectures=[lambda_.Architecture.ARM_64],
+            code=lambda_.Code.from_asset(
+                "../backend/lambda_layers/ffmpeg",
+                bundling=BundlingOptions(
+                    image=lambda_.Runtime.PYTHON_3_11.bundling_image,
+                    local=FFmpegLayerLocalBundling(),
+                ),
+            ),
+        )
+
         # Video Processor Lambda
         video_lambda = lambda_.Function(
             self, "CMEVideoProcessor",
             function_name="cme-video-processor",
             runtime=lambda_.Runtime.PYTHON_3_11,
+            architecture=lambda_.Architecture.ARM_64,
             code=lambda_.Code.from_asset("../backend/lambda_functions"),
             handler="cme_video_processor.handler",
             timeout=Duration.minutes(15),
             memory_size=3008,
+            ephemeral_storage_size=Size.gibibytes(10),
+            layers=[ffmpeg_layer],
             log_retention=logs.RetentionDays.THREE_MONTHS,
-            # ephemeral_storage_size=lambda_.Size.gibibytes(10),  # For video processing - CDK version issue
             role=lambda_role,
             environment={
                 "S3_BUCKET": cme_bucket.bucket_name,

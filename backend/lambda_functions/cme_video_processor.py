@@ -316,11 +316,42 @@ if HAS_KNOWLEDGE_BASE:
 
 class CMEVideoProcessor:
     """Process CME video recordings for action analysis"""
-    
+
+    EVIDENCE_FRAME_RATE = 2.0
+    EVIDENCE_FRAME_INTERVAL_SECONDS = 1.0 / EVIDENCE_FRAME_RATE
+    EVIDENCE_WINDOW_SECONDS = 60.0
+    MAX_EVIDENCE_FRAMES = int(EVIDENCE_WINDOW_SECONDS * EVIDENCE_FRAME_RATE)
+    MAX_MODEL_REVIEW_FRAMES = 20
+
     def __init__(self, s3_bucket: str):
         self.s3_bucket = s3_bucket
-        self.temp_dir = tempfile.gettempdir()
-    
+
+    @staticmethod
+    def _ffmpeg_path() -> Optional[str]:
+        for path in ('/usr/bin/ffmpeg', '/opt/bin/ffmpeg'):
+            if os.path.exists(path):
+                return path
+        return None
+
+    @staticmethod
+    def _safe_s3_token(value: str) -> str:
+        """Keep evidence paths deterministic without accepting arbitrary key syntax."""
+        cleaned = re.sub(r'[^A-Za-z0-9_-]+', '_', str(value or '')).strip('_')
+        return cleaned or 'unknown'
+
+    @classmethod
+    def _select_model_review_frames(cls, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Select a uniform, reproducible subset that fits Bedrock's image limit."""
+        if len(frames) <= cls.MAX_MODEL_REVIEW_FRAMES:
+            return list(frames)
+
+        last_index = len(frames) - 1
+        selected_indexes = {
+            round(index * last_index / (cls.MAX_MODEL_REVIEW_FRAMES - 1))
+            for index in range(cls.MAX_MODEL_REVIEW_FRAMES)
+        }
+        return [frame for index, frame in enumerate(frames) if index in selected_indexes]
+
     def extract_video_segment(
         self,
         video_s3_key: str,
@@ -342,11 +373,7 @@ class CMEVideoProcessor:
             S3 key of extracted segment
         """
         try:
-            ffmpeg_path = (
-                '/usr/bin/ffmpeg' if os.path.exists('/usr/bin/ffmpeg')
-                else '/opt/bin/ffmpeg' if os.path.exists('/opt/bin/ffmpeg')
-                else None
-            )
+            ffmpeg_path = self._ffmpeg_path()
             if not ffmpeg_path:
                 logger.info(
                     "FFmpeg is not available in this Lambda; skipping local segment extraction "
@@ -356,49 +383,157 @@ class CMEVideoProcessor:
 
             # Calculate extraction window (30 seconds before, 30 seconds after)
             extract_start = max(0, start_time - 30)
-            
-            # Generate output filename
+
             segment_id = f"segment_{int(start_time)}_{int(duration)}"
-            local_input = os.path.join(self.temp_dir, 'input_video.mp4')
-            local_output = os.path.join(self.temp_dir, f'{segment_id}.mp4')
             output_s3_key = f"{output_key_prefix}/{segment_id}.mp4"
-            
-            # Download video from S3
-            logger.info(f"Downloading video from s3://{self.s3_bucket}/{video_s3_key}")
-            s3_client.download_file(self.s3_bucket, video_s3_key, local_input)
-            
-            command = [
-                ffmpeg_path,
-                '-i', local_input,
-                '-ss', str(extract_start),
-                '-t', str(duration),
-                '-c:v', 'libx264',
-                '-c:a', 'aac',
-                '-y',  # Overwrite output
-                local_output
-            ]
-            
-            logger.info(f"Extracting segment: start={extract_start}s, duration={duration}s")
-            
-            result = subprocess.run(command, capture_output=True, text=True, timeout=60)
-            if result.returncode != 0:
-                logger.error(f"FFmpeg error: {result.stderr}")
-                return None
+            with tempfile.TemporaryDirectory(prefix='cme-segment-') as temp_dir:
+                local_input = os.path.join(temp_dir, 'input_video')
+                local_output = os.path.join(temp_dir, f'{segment_id}.mp4')
 
-            # Upload segment to S3
-            s3_client.upload_file(local_output, self.s3_bucket, output_s3_key)
-            logger.info(f"Uploaded segment to s3://{self.s3_bucket}/{output_s3_key}")
+                logger.info(f"Downloading video from s3://{self.s3_bucket}/{video_s3_key}")
+                s3_client.download_file(self.s3_bucket, video_s3_key, local_input)
 
-            # Cleanup
-            os.remove(local_input)
-            os.remove(local_output)
+                command = [
+                    ffmpeg_path,
+                    '-i', local_input,
+                    '-ss', str(extract_start),
+                    '-t', str(duration),
+                    '-c:v', 'libx264',
+                    '-c:a', 'aac',
+                    '-y',
+                    local_output,
+                ]
 
-            return output_s3_key
+                logger.info(f"Extracting segment: start={extract_start}s, duration={duration}s")
+                result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+                if result.returncode != 0:
+                    logger.error("FFmpeg segment extraction failed")
+                    return None
+
+                s3_client.upload_file(local_output, self.s3_bucket, output_s3_key)
+                logger.info(f"Uploaded segment to s3://{self.s3_bucket}/{output_s3_key}")
+                return output_s3_key
             
         except Exception as e:
             logger.error(f"Error extracting video segment: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            return None
+
+    def extract_evidence_frames(
+        self,
+        segment_s3_key: str,
+        session_id: str,
+        declared_step_id: str,
+        window_start_seconds: float,
+        window_duration_seconds: float = EVIDENCE_WINDOW_SECONDS,
+    ) -> Optional[Dict[str, Any]]:
+        """Store a deterministic two-FPS evidence set and its timestamp manifest."""
+        ffmpeg_path = self._ffmpeg_path()
+        if not ffmpeg_path:
+            logger.warning("FFmpeg is unavailable; no deterministic evidence frames were created")
+            return None
+
+        session_token = self._safe_s3_token(session_id)
+        step_token = self._safe_s3_token(declared_step_id)
+        evidence_prefix = f'cme-evidence/{session_token}/{step_token}'
+
+        try:
+            with tempfile.TemporaryDirectory(prefix='cme-evidence-') as temp_dir:
+                local_segment = os.path.join(temp_dir, 'segment.mp4')
+                frames_dir = os.path.join(temp_dir, 'frames')
+                os.makedirs(frames_dir, exist_ok=True)
+                frame_pattern = os.path.join(frames_dir, 'frame_%04d.jpg')
+
+                s3_client.download_file(self.s3_bucket, segment_s3_key, local_segment)
+                extraction_command = [
+                    ffmpeg_path,
+                    '-i', local_segment,
+                    '-t', str(window_duration_seconds),
+                    '-vf', f'fps={self.EVIDENCE_FRAME_RATE},scale=min(1280\\,iw):-2',
+                    '-q:v', '3',
+                    '-frames:v', str(self.MAX_EVIDENCE_FRAMES),
+                    '-y',
+                    frame_pattern,
+                ]
+                result = subprocess.run(
+                    extraction_command,
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+                if result.returncode != 0:
+                    logger.error("FFmpeg evidence-frame extraction failed")
+                    return None
+
+                local_frames = sorted(
+                    filename
+                    for filename in os.listdir(frames_dir)
+                    if filename.lower().endswith('.jpg')
+                )
+                if not local_frames:
+                    logger.error("FFmpeg evidence-frame extraction produced no frames")
+                    return None
+
+                frames = []
+                for index, filename in enumerate(local_frames):
+                    frame_id = f'frame_{index + 1:04d}'
+                    timestamp_seconds = round(
+                        window_start_seconds + (index * self.EVIDENCE_FRAME_INTERVAL_SECONDS),
+                        3,
+                    )
+                    s3_key = f'{evidence_prefix}/frames/{frame_id}.jpg'
+                    s3_client.upload_file(
+                        os.path.join(frames_dir, filename),
+                        self.s3_bucket,
+                        s3_key,
+                        ExtraArgs={'ContentType': 'image/jpeg'},
+                    )
+                    frames.append({
+                        'frame_id': frame_id,
+                        'sequence': index + 1,
+                        'timestamp_seconds': timestamp_seconds,
+                        's3_key': s3_key,
+                        's3_uri': f's3://{self.s3_bucket}/{s3_key}',
+                    })
+
+                review_frames = self._select_model_review_frames(frames)
+                manifest = {
+                    'schema_version': '1.0',
+                    'source_segment_s3_key': segment_s3_key,
+                    'window_start_seconds': round(window_start_seconds, 3),
+                    'window_duration_seconds': round(window_duration_seconds, 3),
+                    'sampling': {
+                        'frames_per_second': self.EVIDENCE_FRAME_RATE,
+                        'frame_interval_seconds': self.EVIDENCE_FRAME_INTERVAL_SECONDS,
+                        'frame_count': len(frames),
+                    },
+                    'model_review': {
+                        'selection': 'uniformly_spaced',
+                        'frame_count': len(review_frames),
+                        'frame_ids': [frame['frame_id'] for frame in review_frames],
+                    },
+                    'frames': frames,
+                }
+                manifest_key = f'{evidence_prefix}/manifest.json'
+                s3_client.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=manifest_key,
+                    Body=json.dumps(manifest, separators=(',', ':')).encode('utf-8'),
+                    ContentType='application/json',
+                )
+                logger.info(json.dumps({
+                    'message': 'Evidence frames created',
+                    'session_id': session_token,
+                    'declared_step_id': step_token,
+                    'frame_count': len(frames),
+                    'frames_per_second': self.EVIDENCE_FRAME_RATE,
+                }))
+                return {
+                    'manifest_key': manifest_key,
+                    'sampling': manifest['sampling'],
+                    'review_frames': review_frames,
+                }
+        except Exception as exc:
+            logger.error(f"Error extracting evidence frames: {exc}")
             return None
     
     def _extract_segment_with_mediaconvert(
@@ -716,10 +851,17 @@ def process_video_for_cme_test(
     
     if not segment_key:
         logger.warning(f"Failed to extract segment, analyzing full video instead")
-        # FFmpeg not available - analyze full video with Rekognition
-        # Use the full video and check for motion/people around the test timestamp
         segment_key = video_s3_key  # Use full video
     video_is_segment = segment_key != video_s3_key
+
+    evidence_bundle = None
+    if video_is_segment:
+        evidence_bundle = processor.extract_evidence_frames(
+            segment_s3_key=segment_key,
+            session_id=session_id,
+            declared_step_id=declared_step_id,
+            window_start_seconds=max(0.0, test_timestamp - 30.0),
+        )
     
     # Step 6: Analyze the segment (or full video if segment extraction failed)
     analysis = processor.analyze_video_segment(segment_key, test_type)
@@ -770,6 +912,7 @@ def process_video_for_cme_test(
             video_s3_key=segment_key,
             s3_bucket=s3_bucket,
             video_is_segment=video_is_segment,
+            evidence_frames=(evidence_bundle or {}).get('review_frames', []),
         )
         motion_present = analysis_result['motion_present']
         pose_match = analysis_result['pose_match']
@@ -791,8 +934,11 @@ def process_video_for_cme_test(
         'motion_job_id': motion_job_id,
         'pose_job_id': pose_job_id,
         'motion_labels': extract_motion_labels(motion_result) if motion_result else [],
-        'person_count': count_persons(pose_result) if pose_result else 0
+        'person_count': count_persons(pose_result) if pose_result else 0,
     }
+    if evidence_bundle:
+        analysis_details['evidence_manifest_key'] = evidence_bundle['manifest_key']
+        analysis_details['evidence_sampling'] = evidence_bundle['sampling']
     for detail_key in (
         'analysis_error',
         'provider',
@@ -801,6 +947,7 @@ def process_video_for_cme_test(
         'observed_evidence',
         'missing_evidence',
         'video_format',
+        'reviewed_frame_ids',
     ):
         if analysis_result.get(detail_key) is not None:
             analysis_details[detail_key] = analysis_result[detail_key]
@@ -1249,7 +1396,11 @@ def _video_format_for_key(video_s3_key: str) -> Optional[str]:
     return BEDROCK_VIDEO_FORMATS.get(extension)
 
 
-def _normalize_video_verdict(analysis: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+def _normalize_video_verdict(
+    analysis: Dict[str, Any],
+    model_id: str,
+    allowed_frame_ids: Optional[set[str]] = None,
+) -> Dict[str, Any]:
     raw_motion = analysis.get('motion_present')
     if raw_motion is None and 'performed' in analysis:
         raw_motion = 'performed' if analysis.get('performed') else 'not_observed'
@@ -1287,13 +1438,35 @@ def _normalize_video_verdict(analysis: Dict[str, Any], model_id: str) -> Dict[st
     if motion == 'analysis_unavailable':
         confidence = 0.0
 
+    raw_frame_ids = analysis.get('observed_frame_ids') or []
+    if not isinstance(raw_frame_ids, list):
+        raw_frame_ids = []
+    reviewed_frame_ids = []
+    for frame_id in raw_frame_ids:
+        normalized_id = str(frame_id).strip()
+        if not normalized_id or normalized_id in reviewed_frame_ids:
+            continue
+        if allowed_frame_ids is not None and normalized_id not in allowed_frame_ids:
+            continue
+        reviewed_frame_ids.append(normalized_id)
+
+    if allowed_frame_ids and motion != 'analysis_unavailable' and not reviewed_frame_ids:
+        motion = 'analysis_unavailable'
+        pose_match = 'unknown'
+        confidence = 0.0
+        missing_evidence = list(analysis.get('missing_evidence') or [])
+        missing_evidence.append('No valid deterministic evidence frame was cited.')
+    else:
+        missing_evidence = analysis.get('missing_evidence') or []
+
     return {
         'motion_present': motion,
         'pose_match': pose_match,
         'confidence': confidence,
         'reasoning': str(analysis.get('reasoning') or analysis.get('summary') or '').strip(),
         'observed_evidence': analysis.get('observed_evidence') or [],
-        'missing_evidence': analysis.get('missing_evidence') or [],
+        'missing_evidence': missing_evidence,
+        'reviewed_frame_ids': reviewed_frame_ids,
         'provider': 'bedrock',
         'model_id': model_id,
     }
@@ -1327,7 +1500,8 @@ def _build_video_verdict_prompt(
     transcript_excerpt: str,
     motion_labels: list,
     person_count: int,
-    video_is_segment: bool
+    video_is_segment: bool,
+    evidence_frames: List[Dict[str, Any]],
 ) -> str:
     expectations = TEST_MOTION_EXPECTATIONS.get(test_type, {})
     expected_movements = expectations.get('expected_movements', [])
@@ -1341,6 +1515,21 @@ def _build_video_verdict_prompt(
             'If you cannot confidently evaluate that point in the recording, return analysis_unavailable.'
         )
     )
+    if evidence_frames:
+        evidence_frame_instruction = (
+            'The attached JPEGs are a deterministic evidence sample taken at two frames per '
+            'second from this window. Cite only the frame IDs listed below when a conclusion '
+            'depends on a still image:\n'
+            + '\n'.join(
+                f"- {frame['frame_id']}: {frame['timestamp_seconds']:.3f}s"
+                for frame in evidence_frames
+            )
+        )
+    else:
+        evidence_frame_instruction = (
+            'No deterministic still-frame artifact is available for this run. Do not claim a '
+            'specific evidence frame supports the result.'
+        )
 
     return f"""You are verifying a Compulsory Medical Examination video for a legal evidence workflow.
 
@@ -1360,12 +1549,15 @@ Hunter reference context:
 
 {timing_instruction}
 
+{evidence_frame_instruction}
+
 Rules:
 - Use the video evidence as the source of truth.
 - Use Hunter references as technique standards only; do not treat them as proof that this exam action happened.
 - Do not mark performed or not_observed from transcript wording alone.
 - Return analysis_unavailable when the clip, angle, resolution, timestamp, or model access prevents a reliable visual decision.
 - Mark brief only when some exam movement is visible but the action is too limited or incomplete for a full match.
+- When deterministic evidence frames are attached, cite at least one listed frame ID for every result other than analysis_unavailable.
 
 Return JSON only:
 {{
@@ -1374,7 +1566,8 @@ Return JSON only:
   "confidence": 0.0,
   "reasoning": "one sentence tied to visible evidence",
   "observed_evidence": ["short visual facts"],
-  "missing_evidence": ["short gaps or uncertainties"]
+  "missing_evidence": ["short gaps or uncertainties"],
+  "observed_frame_ids": ["frame_0001"]
 }}"""
 
 
@@ -1389,6 +1582,7 @@ def _analyze_video_with_nova(
     video_s3_key: str,
     s3_bucket: str,
     video_is_segment: bool,
+    evidence_frames: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     video_format = _video_format_for_key(video_s3_key)
     if not video_format:
@@ -1404,6 +1598,7 @@ def _analyze_video_with_nova(
     if not hasattr(bedrock_client, 'converse'):
         raise RuntimeError('bedrock_converse_api_unavailable')
 
+    review_frames = list(evidence_frames or [])[:CMEVideoProcessor.MAX_MODEL_REVIEW_FRAMES]
     prompt = _build_video_verdict_prompt(
         test_type,
         test_timestamp,
@@ -1411,25 +1606,37 @@ def _analyze_video_with_nova(
         motion_labels,
         person_count,
         video_is_segment,
+        review_frames,
     )
     video_uri = f"s3://{s3_bucket}/{video_s3_key}"
+    content = [
+        {'text': prompt},
+        {
+            'video': {
+                'format': video_format,
+                'source': {
+                    's3Location': {
+                        'uri': video_uri,
+                    }
+                }
+            }
+        },
+    ]
+    content.extend({
+        'image': {
+            'format': 'jpeg',
+            'source': {
+                's3Location': {
+                    'uri': frame['s3_uri'],
+                }
+            }
+        }
+    } for frame in review_frames)
     response = bedrock_client.converse(
         modelId=model_id,
         messages=[{
             'role': 'user',
-            'content': [
-                {'text': prompt},
-                {
-                    'video': {
-                        'format': video_format,
-                        'source': {
-                            's3Location': {
-                                'uri': video_uri,
-                            }
-                        }
-                    }
-                },
-            ],
+            'content': content,
         }],
         inferenceConfig={
             'maxTokens': 500,
@@ -1451,7 +1658,11 @@ def _analyze_video_with_nova(
     if not parsed:
         raise ValueError('bedrock_nova_returned_unparseable_json')
 
-    verdict = _normalize_video_verdict(parsed, model_id)
+    verdict = _normalize_video_verdict(
+        parsed,
+        model_id,
+        allowed_frame_ids={frame['frame_id'] for frame in review_frames},
+    )
     verdict['video_uri'] = video_uri
     verdict['video_format'] = video_format
     return verdict
@@ -1466,6 +1677,7 @@ def analyze_with_bedrock(
     video_s3_key: Optional[str] = None,
     s3_bucket: Optional[str] = None,
     video_is_segment: bool = False,
+    evidence_frames: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Use Bedrock to intelligently determine if test was performed.
@@ -1487,6 +1699,7 @@ def analyze_with_bedrock(
                 video_s3_key=video_s3_key,
                 s3_bucket=s3_bucket,
                 video_is_segment=video_is_segment,
+                evidence_frames=evidence_frames,
             )
         except Exception as e:
             logger.warning(f"Bedrock Nova video analysis failed: {e}")

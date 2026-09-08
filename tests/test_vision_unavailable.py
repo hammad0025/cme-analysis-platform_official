@@ -6,6 +6,7 @@ examiner skipped a test -- for any recording whose clock differed. These
 tests lock in the honest behavior.
 """
 import importlib.util
+import json
 import logging
 import sys
 import types
@@ -125,6 +126,81 @@ def test_nova_video_analysis_uses_s3_video_block(processor, monkeypatch):
     )
 
 
+def test_nova_video_analysis_attaches_review_frames_and_filters_unknown_ids(processor, monkeypatch):
+    monkeypatch.setenv("CME_BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+    sent = {}
+
+    class _Bedrock:
+        def converse(self, **kwargs):
+            sent.update(kwargs)
+            return {
+                "output": {
+                    "message": {
+                        "content": [{
+                            "text": (
+                                '{"motion_present":"performed",'
+                                '"pose_match":"full_match",'
+                                '"confidence":0.86,'
+                                '"reasoning":"Visible arm movement is shown.",'
+                                '"observed_evidence":["arm movement"],'
+                                '"missing_evidence":[],'
+                                '"observed_frame_ids":["frame_0001","invented_frame"]}'
+                            )
+                        }]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(processor, "bedrock_client", _Bedrock())
+    evidence_frames = [
+        {
+            "frame_id": f"frame_{index:04d}",
+            "timestamp_seconds": index / 2,
+            "s3_uri": f"s3://bucket/cme-evidence/case/step/frames/frame_{index:04d}.jpg",
+        }
+        for index in range(1, 23)
+    ]
+
+    result = processor.analyze_with_bedrock(
+        test_type="manual_muscle_testing",
+        test_timestamp=42.0,
+        transcript_excerpt="squeeze my fingers",
+        motion_labels=[],
+        person_count=2,
+        video_s3_key="cme-segments/case/clip.mp4",
+        s3_bucket="bucket",
+        video_is_segment=True,
+        evidence_frames=evidence_frames,
+    )
+
+    content = sent["messages"][0]["content"]
+    image_blocks = [block["image"] for block in content if "image" in block]
+    assert len(image_blocks) == 20
+    assert image_blocks[0]["source"]["s3Location"]["uri"].endswith("frame_0001.jpg")
+    assert "frame_0001: 0.500s" in content[0]["text"]
+    assert result["reviewed_frame_ids"] == ["frame_0001"]
+
+
+def test_deterministic_evidence_requires_a_valid_frame_citation(processor):
+    result = processor._normalize_video_verdict(
+        {
+            "motion_present": "performed",
+            "pose_match": "full_match",
+            "confidence": 0.9,
+            "observed_evidence": ["movement"],
+            "observed_frame_ids": ["invented_frame"],
+        },
+        "amazon.nova-lite-v1:0",
+        allowed_frame_ids={"frame_0001"},
+    )
+
+    assert result["motion_present"] == "analysis_unavailable"
+    assert result["pose_match"] == "unknown"
+    assert result["confidence"] == 0.0
+    assert result["reviewed_frame_ids"] == []
+    assert "No valid deterministic evidence frame was cited." in result["missing_evidence"]
+
+
 def test_segment_extraction_skips_s3_download_without_ffmpeg(processor, monkeypatch):
     class _S3:
         def download_file(self, *_args, **_kwargs):
@@ -139,6 +215,65 @@ def test_segment_extraction_skips_s3_download_without_ffmpeg(processor, monkeypa
     )
 
     assert segment is None
+
+
+def test_evidence_frame_extraction_creates_timestamped_manifest(processor, monkeypatch):
+    uploads = []
+    manifests = []
+
+    class _S3:
+        def download_file(self, _bucket, _key, target):
+            Path(target).write_bytes(b"segment")
+
+        def upload_file(self, source, bucket, key, ExtraArgs=None):
+            uploads.append({
+                "source": Path(source).name,
+                "bucket": bucket,
+                "key": key,
+                "extra_args": ExtraArgs,
+            })
+
+        def put_object(self, **kwargs):
+            manifests.append(kwargs)
+
+    def _run(command, **_kwargs):
+        pattern = Path(command[-1])
+        pattern.parent.mkdir(parents=True, exist_ok=True)
+        for index in range(25):
+            (pattern.parent / f"frame_{index + 1:04d}.jpg").write_bytes(b"jpeg")
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr(processor, "s3_client", _S3())
+    monkeypatch.setattr(processor.CMEVideoProcessor, "_ffmpeg_path", lambda _self: "/opt/bin/ffmpeg")
+    monkeypatch.setattr(processor.subprocess, "run", _run)
+
+    evidence = processor.CMEVideoProcessor("bucket").extract_evidence_frames(
+        segment_s3_key="cme-segments/case/segment.mp4",
+        session_id="case/with unsafe chars",
+        declared_step_id="step 1",
+        window_start_seconds=12.0,
+    )
+
+    assert evidence["sampling"] == {
+        "frames_per_second": 2.0,
+        "frame_interval_seconds": 0.5,
+        "frame_count": 25,
+    }
+    assert len(uploads) == 25
+    assert all(upload["extra_args"] == {"ContentType": "image/jpeg"} for upload in uploads)
+    assert uploads[0]["key"] == "cme-evidence/case_with_unsafe_chars/step_1/frames/frame_0001.jpg"
+    assert len(evidence["review_frames"]) == 20
+    assert evidence["review_frames"][0]["timestamp_seconds"] == 12.0
+    assert evidence["review_frames"][-1]["timestamp_seconds"] == 24.0
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0]["Body"])
+    assert manifest["sampling"]["frame_count"] == 25
+    assert manifest["frames"][1]["timestamp_seconds"] == 12.5
+    assert manifest["model_review"]["selection"] == "uniformly_spaced"
 
 
 def test_nova_unsupported_video_format_is_unavailable(processor, monkeypatch):
@@ -193,6 +328,9 @@ def test_process_result_marks_unavailable_status(processor, monkeypatch):
             pass
 
         def extract_video_segment(self, **_kwargs):
+            return None
+
+        def extract_evidence_frames(self, **_kwargs):
             return None
 
         def analyze_video_segment(self, *_args, **_kwargs):
