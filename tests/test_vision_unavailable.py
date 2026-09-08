@@ -125,6 +125,22 @@ def test_nova_video_analysis_uses_s3_video_block(processor, monkeypatch):
     )
 
 
+def test_segment_extraction_skips_s3_download_without_ffmpeg(processor, monkeypatch):
+    class _S3:
+        def download_file(self, *_args, **_kwargs):
+            raise AssertionError("should not download the full video when ffmpeg is unavailable")
+
+    monkeypatch.setattr(processor, "s3_client", _S3())
+    monkeypatch.setattr(processor.os.path, "exists", lambda _path: False)
+
+    segment = processor.CMEVideoProcessor("bucket").extract_video_segment(
+        video_s3_key="cme-recordings/case/hour-long.mp4",
+        start_time=1800,
+    )
+
+    assert segment is None
+
+
 def test_nova_unsupported_video_format_is_unavailable(processor, monkeypatch):
     monkeypatch.setenv("CME_BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
 
@@ -245,3 +261,38 @@ def test_handler_logs_unavailable_without_discrepancy(processor, monkeypatch, ca
     assert result["statusCode"] == 200
     assert "Test NOT ANALYZED" in caplog.text
     assert "Test NOT OBSERVED" not in caplog.text
+
+
+def test_handler_missing_fields_does_not_echo_event(processor):
+    result = processor.handler(
+        {
+            "session_id": "cme_test",
+            "authorization": "Bearer secret-token",
+        },
+        None,
+    )
+
+    assert result["statusCode"] == 400
+    assert "event" not in result
+    assert "traceback" not in result
+    assert "secret-token" not in str(result)
+
+
+def test_handler_exception_does_not_return_traceback(processor, monkeypatch):
+    def _raise(**_kwargs):
+        raise RuntimeError("vision service unavailable")
+
+    monkeypatch.setattr(processor, "process_video_for_cme_test", _raise)
+
+    result = processor.handler(
+        {
+            "session_id": "cme_test",
+            "declared_test": {"label": "manual_muscle_testing", "timestamp": 42.0},
+            "video_s3_key": "input.mp4",
+        },
+        None,
+    )
+
+    assert result["statusCode"] == 500
+    assert result["error"] == "vision service unavailable"
+    assert "traceback" not in result

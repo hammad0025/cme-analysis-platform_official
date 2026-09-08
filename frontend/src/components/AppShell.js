@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import CasesSidebar from './layout/CasesSidebar';
 import { isMockMode } from '../services/casesService';
+import { DEV_MODE } from '../config/runtime';
 
 export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -49,7 +50,7 @@ export default function AppShell() {
           <span>CME Analysis Platform · Internal preview</span>
           <span className="font-mono text-[10px]">
             {mock ? 'Mock API' : 'Live API'}
-            {process.env.REACT_APP_DEV_MODE === 'true' ? ' · Dev' : ''}
+            {DEV_MODE ? ' · Dev' : ''}
           </span>
         </footer>
       </div>

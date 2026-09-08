@@ -1,7 +1,5 @@
 import axios from 'axios';
-
-const DEV_MODE = process.env.REACT_APP_DEV_MODE === 'true';
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod';
+import { API_BASE_URL, DEV_MODE } from '../config/runtime';
 
 const cmeApi = axios.create({
   baseURL: API_BASE_URL,
@@ -37,7 +35,6 @@ cmeApi.interceptors.response.use(
 );
 
 export default cmeApi;
-
 
 
 

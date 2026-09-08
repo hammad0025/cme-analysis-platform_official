@@ -342,6 +342,18 @@ class CMEVideoProcessor:
             S3 key of extracted segment
         """
         try:
+            ffmpeg_path = (
+                '/usr/bin/ffmpeg' if os.path.exists('/usr/bin/ffmpeg')
+                else '/opt/bin/ffmpeg' if os.path.exists('/opt/bin/ffmpeg')
+                else None
+            )
+            if not ffmpeg_path:
+                logger.info(
+                    "FFmpeg is not available in this Lambda; skipping local segment extraction "
+                    "and using direct S3 video analysis."
+                )
+                return None
+
             # Calculate extraction window (30 seconds before, 30 seconds after)
             extract_start = max(0, start_time - 30)
             
@@ -355,10 +367,8 @@ class CMEVideoProcessor:
             logger.info(f"Downloading video from s3://{self.s3_bucket}/{video_s3_key}")
             s3_client.download_file(self.s3_bucket, video_s3_key, local_input)
             
-            # Extract segment using FFmpeg
-            # Note: In production Lambda, you'd include FFmpeg layer or use MediaConvert
             command = [
-                'ffmpeg',
+                ffmpeg_path,
                 '-i', local_input,
                 '-ss', str(extract_start),
                 '-t', str(duration),
@@ -370,28 +380,20 @@ class CMEVideoProcessor:
             
             logger.info(f"Extracting segment: start={extract_start}s, duration={duration}s")
             
-            # For Lambda, you'd need to check if ffmpeg is available
-            if os.path.exists('/usr/bin/ffmpeg') or os.path.exists('/opt/bin/ffmpeg'):
-                result = subprocess.run(command, capture_output=True, text=True, timeout=60)
-                if result.returncode != 0:
-                    logger.error(f"FFmpeg error: {result.stderr}")
-                    return None
-                
-                # Upload segment to S3
-                s3_client.upload_file(local_output, self.s3_bucket, output_s3_key)
-                logger.info(f"Uploaded segment to s3://{self.s3_bucket}/{output_s3_key}")
-                
-                # Cleanup
-                os.remove(local_input)
-                os.remove(local_output)
-                
-                return output_s3_key
-            else:
-                # Fallback: Use AWS MediaConvert or Elemental for video processing
-                logger.warning("FFmpeg not available, using MediaConvert fallback")
-                return self._extract_segment_with_mediaconvert(
-                    video_s3_key, extract_start, duration, output_s3_key
-                )
+            result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                logger.error(f"FFmpeg error: {result.stderr}")
+                return None
+
+            # Upload segment to S3
+            s3_client.upload_file(local_output, self.s3_bucket, output_s3_key)
+            logger.info(f"Uploaded segment to s3://{self.s3_bucket}/{output_s3_key}")
+
+            # Cleanup
+            os.remove(local_input)
+            os.remove(local_output)
+
+            return output_s3_key
             
         except Exception as e:
             logger.error(f"Error extracting video segment: {str(e)}")
@@ -1890,13 +1892,24 @@ def handler(event, context):
     Processes a single declared test
     """
     try:
-        logger.info(f"Video Processor invoked: {json.dumps(event)}")
-        
         # Handle both Step Functions payload and direct invocation
         # Step Functions wraps payload, direct invocation passes event directly
-        payload = event
-        if 'Payload' in event:
+        payload = event if isinstance(event, dict) else {}
+        if isinstance(event, dict) and 'Payload' in event:
             payload = event['Payload']
+        declared_for_log = payload.get('declared_test') or payload.get('test') or {}
+        logger.info(json.dumps({
+            'message': 'Video Processor invoked',
+            'request_id': getattr(context, 'aws_request_id', None),
+            'session_id': payload.get('session_id'),
+            'has_declared_test': bool(declared_for_log),
+            'declared_test_label': (
+                declared_for_log.get('label')
+                if isinstance(declared_for_log, dict)
+                else None
+            ),
+            'has_video_s3_key': bool(payload.get('video_s3_key')),
+        }))
         
         session_id = payload.get('session_id')
         declared_test = payload.get('declared_test') or payload.get('test')
@@ -1909,7 +1922,6 @@ def handler(event, context):
             return {
                 'statusCode': 400,
                 'error': error_msg,
-                'event': json.dumps(event)
             }
         
         test_label = declared_test.get('label', 'unknown')
@@ -1957,5 +1969,4 @@ def handler(event, context):
         return {
             'statusCode': 500,
             'error': str(e),
-            'traceback': traceback.format_exc()
         }

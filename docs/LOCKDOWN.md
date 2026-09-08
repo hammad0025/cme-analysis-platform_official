@@ -18,7 +18,7 @@ Prints `SET` / `MISSING` only — never secret values. Exits `1` if critical key
 |-----|--------------|-------|
 | `CME_ALLOW_LOCAL_ANALYSIS=1` | Local analyze + verifier | Cost gate; must be exactly `1` |
 | `OPENAI_API_KEY` | Local analyze + verifier LLM | Default vision + text provider |
-| `REACT_APP_API_URL` | Frontend live mode | Required when `REACT_APP_USE_MOCK_API=false` |
+| `REACT_APP_API_URL` | Frontend live mode | Optional; defaults to the deployed CME API when unset |
 
 Copy `.env.example` → `.env` (gitignored). Never commit `.env`.
 
@@ -91,8 +91,9 @@ Note: `--offline` still requires `CME_ALLOW_LOCAL_ANALYSIS=1` (or `--force`) —
 
 All non-OPTIONS methods on the CME Analysis API (`g4dzem9rtk`, stage `prod`) require a
 Cognito ID token from the `cme-analysis-users` pool (`us-east-1_t8m33Ihhq`), sent as
-`Authorization: Bearer <IdToken>`. Authorizer: `cme-cognito-authorizer` (API Gateway,
-type COGNITO_USER_POOLS). OPTIONS remains open for CORS preflight.
+`Authorization: Bearer <IdToken>`. Authorizer is managed in CDK as
+`cme-cognito-authorizer-cdk` (API Gateway, type COGNITO_USER_POOLS). OPTIONS
+remains open for CORS preflight.
 
 Consequences:
 
@@ -112,8 +113,12 @@ Consequences:
 ## Frontend lockdown
 
 - **No AI keys** in `REACT_APP_*` variables (grep verified clean)
-- `REACT_APP_USE_MOCK_API=false` without `REACT_APP_API_URL` → falls back to mock with console warning
-- Cognito only when `REACT_APP_DEV_MODE=false`
+- Production builds ignore `REACT_APP_DEV_MODE=true` and require Cognito.
+- Production builds ignore `REACT_APP_USE_MOCK_API=true` unless
+  `REACT_APP_ALLOW_PRODUCTION_MOCK_API=true` is deliberately set.
+- Local development can still use mock mode for offline demos.
+- Production upload supports one recording per case: MP4/MOV/M4V/WEBM or
+  supported audio. MPG/MPEG/AVI/MKV/WMV/FLV should be re-encoded before upload.
 
 ## Key rotation
 

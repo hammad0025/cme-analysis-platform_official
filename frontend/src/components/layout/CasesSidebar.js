@@ -5,8 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import StatusBadge from '../case/StatusBadge';
 import { caseDetailPath, isCaseDetailActive } from '../../lib/caseRoutes';
 import { clearAllMockCases, isMockMode, listCases } from '../../services/casesService';
-
-const isDevMode = process.env.REACT_APP_DEV_MODE === 'true';
+import { DEV_MODE } from '../../config/runtime';
 
 const PRIMARY_NAV = [
   {
@@ -53,6 +52,8 @@ export default function CasesSidebar({ mobileOpen, onClose }) {
     try {
       const { cases: list } = await listCases();
       setCases(list);
+    } catch (_err) {
+      setCases([]);
     } finally {
       setLoadingCases(false);
     }
@@ -240,7 +241,7 @@ export default function CasesSidebar({ mobileOpen, onClose }) {
             Sign out
           </button>
 
-          {isDevMode && (
+          {DEV_MODE && (
             <button
               type="button"
               onClick={onResetDemo}

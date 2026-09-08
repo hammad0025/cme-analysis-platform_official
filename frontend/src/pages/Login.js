@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-
-const DEV_MODE = process.env.REACT_APP_DEV_MODE === 'true';
+import { DEV_MODE } from '../config/runtime';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -148,4 +147,3 @@ export default function Login() {
     </div>
   );
 }
-

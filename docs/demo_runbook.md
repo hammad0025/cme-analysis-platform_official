@@ -43,8 +43,10 @@ Walk-through:
    `Dr. Brett Osborn DO`), exam date, date of injury, date of birth.
    - Inline validation catches future dates, missing fields, and DOB after
      exam date.
-3. Step 2 (Video): drag-and-drop or browse to attach an `.mp4` / `.mov`
-   recording. The card shows file name, size, and a Remove button.
+3. Step 2 (Video): drag-and-drop or browse to attach one `.mp4` / `.mov`
+   recording. The card shows file name, size, and a Remove button. The
+   production workflow currently supports one recording per case; combine split
+   exam segments before upload.
 4. Step 3 (Reports): drop in one or more PDFs. Tag each as Defense expert
    report / Initial IME / Plaintiff's medical history / Other.
 5. Step 4 (Review and submit): everything you entered. Submit fires
@@ -83,8 +85,8 @@ The sample case page shows:
 ## Things that will fail without the network
 
 - Live API mode (the deployed backend at `g4dzem9rtk.execute-api.us-east-1`).
-  If you set `REACT_APP_USE_MOCK_API=false` and the API is unreachable, the
-  upload submit step surfaces a clear error and the case is not created.
+  If the API is unreachable, production surfaces a live API error instead of
+  falling back to local demo cases.
 - Real Cognito sign-in when `REACT_APP_DEV_MODE=false`.
 
 ## Honest disclaimer language for the demo

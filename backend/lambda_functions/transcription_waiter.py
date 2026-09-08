@@ -103,9 +103,6 @@ def handler(event, context):
             else:
                 transcript_uri = job['Transcript']['TranscriptFileUri']
             
-            # Download and parse transcript
-            transcript_data = download_transcript(transcript_uri)
-
             # Store a stable s3:// URI (Transcribe returns a full https URL)
             stored_uri = normalize_s3_uri(transcript_uri)
 
@@ -125,8 +122,7 @@ def handler(event, context):
                 'statusCode': 200,
                 'session_id': session_id,
                 'status': 'COMPLETED',
-                'transcript_uri': transcript_uri,
-                'transcript_data': transcript_data
+                'transcript_uri': stored_uri
             }
         
         elif status == 'FAILED':
@@ -195,6 +191,5 @@ def download_transcript(transcript_uri: str) -> dict:
 
 
 import time
-
 
 

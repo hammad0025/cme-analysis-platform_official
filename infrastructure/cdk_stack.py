@@ -17,6 +17,7 @@ from aws_cdk import (
     aws_stepfunctions_tasks as tasks,
     aws_cognito as cognito,
     aws_cloudwatch as cloudwatch,
+    aws_logs as logs,
     RemovalPolicy,
 )
 from constructs import Construct
@@ -238,6 +239,7 @@ class CMEAnalysisPlatformStack(Stack):
             handler="cme_handler.handler",
             timeout=Duration.seconds(30),
             memory_size=512,
+            log_retention=logs.RetentionDays.THREE_MONTHS,
             role=lambda_role,
             environment={
                 "S3_BUCKET": cme_bucket.bucket_name,
@@ -260,6 +262,7 @@ class CMEAnalysisPlatformStack(Stack):
             handler="transcription_waiter.handler",
             timeout=Duration.seconds(30),
             memory_size=256,
+            log_retention=logs.RetentionDays.THREE_MONTHS,
             role=lambda_role,
             environment={
                 "CME_SESSIONS_TABLE": sessions_table.table_name
@@ -275,6 +278,7 @@ class CMEAnalysisPlatformStack(Stack):
             handler="cme_nlp_processor.handler",
             timeout=Duration.minutes(5),
             memory_size=2048,
+            log_retention=logs.RetentionDays.THREE_MONTHS,
             role=lambda_role,
             environment={
                 "CME_SESSIONS_TABLE": sessions_table.table_name,
@@ -293,6 +297,7 @@ class CMEAnalysisPlatformStack(Stack):
             handler="cme_video_processor.handler",
             timeout=Duration.minutes(15),
             memory_size=3008,
+            log_retention=logs.RetentionDays.THREE_MONTHS,
             # ephemeral_storage_size=lambda_.Size.gibibytes(10),  # For video processing - CDK version issue
             role=lambda_role,
             environment={
@@ -311,6 +316,7 @@ class CMEAnalysisPlatformStack(Stack):
             handler="cme_report_generator.generate_report",
             timeout=Duration.minutes(5),
             memory_size=1024,
+            log_retention=logs.RetentionDays.THREE_MONTHS,
             role=lambda_role,
             environment={
                 "S3_BUCKET": cme_bucket.bucket_name,
@@ -337,33 +343,43 @@ class CMEAnalysisPlatformStack(Stack):
                 throttling_rate_limit=1000,
                 throttling_burst_limit=2000,
                 logging_level=apigateway.MethodLoggingLevel.INFO,
-                data_trace_enabled=True
+                data_trace_enabled=False
             )
         )
 
         # API Integration
         api_integration = apigateway.LambdaIntegration(api_lambda)
+        cognito_authorizer = apigateway.CognitoUserPoolsAuthorizer(
+            self,
+            "CMEApiCognitoAuthorizer",
+            cognito_user_pools=[user_pool],
+            authorizer_name="cme-cognito-authorizer-cdk",
+        )
+        protected_method_options = {
+            "authorization_type": apigateway.AuthorizationType.COGNITO,
+            "authorizer": cognito_authorizer,
+        }
 
         # API Resources
         cme = api.root.add_resource("cme")
         sessions = cme.add_resource("sessions")
-        sessions.add_method("POST", api_integration)
-        sessions.add_method("GET", api_integration)
+        sessions.add_method("POST", api_integration, **protected_method_options)
+        sessions.add_method("GET", api_integration, **protected_method_options)
 
         session_detail = sessions.add_resource("{session_id}")
-        session_detail.add_method("GET", api_integration)
+        session_detail.add_method("GET", api_integration, **protected_method_options)
 
         report = session_detail.add_resource("report")
-        report.add_method("GET", api_integration)
+        report.add_method("GET", api_integration, **protected_method_options)
 
         consent = cme.add_resource("consent")
-        consent.add_method("POST", api_integration)
+        consent.add_method("POST", api_integration, **protected_method_options)
 
         upload = cme.add_resource("upload")
-        upload.add_method("POST", api_integration)
+        upload.add_method("POST", api_integration, **protected_method_options)
 
         process = cme.add_resource("process")
-        process.add_method("POST", api_integration)
+        process.add_method("POST", api_integration, **protected_method_options)
 
         # ========== CloudWatch Dashboards ==========
         dashboard = cloudwatch.Dashboard(

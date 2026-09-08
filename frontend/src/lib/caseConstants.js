@@ -5,9 +5,43 @@ export const STEPS = [
   { id: 4, title: 'Review & submit', description: 'Confirm and upload' },
 ];
 
-export const VIDEO_MIME_PATTERN = /^video\//i;
-export const VIDEO_EXT_PATTERN = /\.(mp4|mov|m4v|mpg|mpeg|avi|mkv|webm)$/i;
-export const VIDEO_ACCEPT = 'video/*,.mp4,.mov,.m4v,.mpg,.mpeg,.avi,.mkv,.webm';
+export const SUPPORTED_RECORDING_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/mp4',
+  'audio/x-m4a',
+  'audio/wav',
+  'audio/wave',
+  'audio/x-wav',
+  'audio/flac',
+  'audio/ogg',
+  'audio/amr',
+]);
+export const VIDEO_EXT_PATTERN = /\.(mp4|mov|m4v|webm|mp3|m4a|wav|flac|ogg|amr)$/i;
+export const VIDEO_ACCEPT = [
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/wav',
+  'audio/flac',
+  'audio/ogg',
+  'audio/amr',
+  '.mp4',
+  '.mov',
+  '.m4v',
+  '.webm',
+  '.mp3',
+  '.m4a',
+  '.wav',
+  '.flac',
+  '.ogg',
+  '.amr',
+].join(',');
 export const PDF_ACCEPT = 'application/pdf,.pdf';
 export const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024;
 
@@ -83,7 +117,10 @@ export const formatBytes = (n) => {
 };
 
 export const isVideoFile = (file) =>
-  !!file && (VIDEO_MIME_PATTERN.test(file.type || '') || VIDEO_EXT_PATTERN.test(file.name || ''));
+  !!file && (
+    SUPPORTED_RECORDING_MIME_TYPES.has(String(file.type || '').toLowerCase())
+    || VIDEO_EXT_PATTERN.test(file.name || '')
+  );
 
 export const isPdfFile = (file) =>
   !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));

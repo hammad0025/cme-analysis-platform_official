@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CognitoUserPool, CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
+import { DEV_MODE } from '../config/runtime';
 
 const AuthContext = createContext();
-
-const DEV_MODE = process.env.REACT_APP_DEV_MODE === 'true';
 
 const DEV_USER = {
   email: 'demo@cme.local',
@@ -24,6 +23,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (DEV_MODE) {
       setUser(DEV_USER);
+      localStorage.setItem('auth_token', 'dev-mode-token');
       setLoading(false);
       return;
     }
@@ -32,19 +32,24 @@ export function AuthProvider({ children }) {
   }, []);
 
   const checkUser = () => {
+    const clearSession = () => {
+      localStorage.removeItem('auth_token');
+      setUser(null);
+      setLoading(false);
+    };
+
     const cognitoUser = userPool.getCurrentUser();
     if (cognitoUser) {
       cognitoUser.getSession((err, session) => {
         if (err) {
-          setUser(null);
-          setLoading(false);
+          clearSession();
           return;
         }
         if (session.isValid()) {
+          localStorage.setItem('auth_token', session.getIdToken().getJwtToken());
           cognitoUser.getUserAttributes((err, attributes) => {
             if (err) {
-              setUser(null);
-              setLoading(false);
+              clearSession();
               return;
             }
             const userData = {};
@@ -55,13 +60,11 @@ export function AuthProvider({ children }) {
             setLoading(false);
           });
         } else {
-          setUser(null);
-          setLoading(false);
+          clearSession();
         }
       });
     } else {
-      setUser(null);
-      setLoading(false);
+      clearSession();
     }
   };
 
@@ -190,4 +193,3 @@ export function useAuth() {
   }
   return context;
 }
-

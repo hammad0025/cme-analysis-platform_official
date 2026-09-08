@@ -1684,7 +1684,13 @@ def handler(event, context):
     Lambda handler for Step Functions invocation
     """
     try:
-        logger.info(f"NLP Processor invoked: {json.dumps(event)}")
+        logger.info(json.dumps({
+            'message': 'NLP Processor invoked',
+            'request_id': getattr(context, 'aws_request_id', None),
+            'session_id': event.get('session_id') if isinstance(event, dict) else None,
+            'has_transcript_data': bool(event.get('transcript_data')) if isinstance(event, dict) else False,
+            'has_transcript_uri': bool(event.get('transcript_uri')) if isinstance(event, dict) else False,
+        }))
         
         session_id = event['session_id']
         transcript_data = event.get('transcript_data')

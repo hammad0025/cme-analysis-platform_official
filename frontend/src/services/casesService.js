@@ -1,38 +1,19 @@
 /**
  * Cases service: wraps the live API and a fully local mock so the demo flow
- * works whether or not the deployed backend is reachable. Toggle with
- * REACT_APP_USE_MOCK_API=true (default off when an explicit API URL is set,
- * default on when REACT_APP_DEV_MODE=true).
+ * works in local development when the deployed backend is not reachable.
+ * Production builds always use the live API unless
+ * REACT_APP_ALLOW_PRODUCTION_MOCK_API=true is deliberately set.
  *
  * No analyzer code is invoked from here. Mock mode only stores case metadata
  * in localStorage and simulates upload progress.
  */
 import api from './cmeApi';
+import { IS_PRODUCTION_BUILD, USE_MOCK_API } from '../config/runtime';
 
 const STORAGE_KEY = 'cme_mock_cases_v1';
 const DIRECT_UPLOAD_TIMEOUT_MS = 115 * 60 * 1000;
 
-const USE_MOCK = (() => {
-  const explicit = process.env.REACT_APP_USE_MOCK_API;
-  const apiUrl = (process.env.REACT_APP_API_URL || '').trim();
-  if (explicit === 'true') return true;
-  if (explicit === 'false') {
-    if (!apiUrl) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn(
-          '[CME] REACT_APP_USE_MOCK_API=false requires REACT_APP_API_URL; using mock mode.',
-        );
-      }
-      return true;
-    }
-    return false;
-  }
-  // Default: mock when explicitly in dev mode and no overriding API URL.
-  if (process.env.REACT_APP_DEV_MODE === 'true' && !apiUrl) {
-    return true;
-  }
-  return false;
-})();
+const USE_MOCK = USE_MOCK_API;
 
 export const isMockMode = () => USE_MOCK;
 
@@ -156,23 +137,21 @@ export function clearAllMockCases() {
 
 export const MOCK_CASES_STORAGE_KEY = STORAGE_KEY;
 
-// Browsers often report an empty MIME type for less common containers
-// (.mpg, .mkv, ...). The presigned URL is signed against the content type we
+// Browsers often report an empty MIME type for some media files. The
+// presigned URL is signed against the content type we
 // request, so the PUT must send the exact same header — infer it here and use
 // it in both places.
 const EXTENSION_CONTENT_TYPES = {
   mp4: 'video/mp4',
   m4v: 'video/mp4',
   mov: 'video/quicktime',
-  mpg: 'video/mpeg',
-  mpeg: 'video/mpeg',
-  avi: 'video/x-msvideo',
-  mkv: 'video/x-matroska',
   webm: 'video/webm',
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',
   wav: 'audio/wav',
   flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  amr: 'audio/amr',
   pdf: 'application/pdf',
   doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -319,7 +298,7 @@ export async function startProcessing({ caseId, video, videos, reports }) {
   return { ok: true, mock: false, ...(resp.data || {}) };
 }
 
-/** Try to list sessions/cases from live API; gracefully fall back to mock. */
+/** Try to list sessions/cases from live API; local fallback is development-only. */
 export async function listCases() {
   const mockCases = readMockCases();
   if (USE_MOCK) {
@@ -339,6 +318,9 @@ export async function listCases() {
     }));
     return { cases: [...mockCases, ...normalized], source: 'live' };
   } catch (err) {
+    if (IS_PRODUCTION_BUILD || err.response?.status === 401) {
+      throw err;
+    }
     return { cases: mockCases, source: 'mock-fallback', error: err };
   }
 }

@@ -199,7 +199,7 @@ export default function NewCase() {
       }
     }
     if (step === 2 && videos.length === 0) {
-      setVideoError('Please attach at least one examination video before continuing.');
+      setVideoError('Please attach an examination recording before continuing.');
       return;
     }
     if (step === 3) setReportError('');
@@ -223,22 +223,26 @@ export default function NewCase() {
       setVideoError(
         rejects.length === 1 && rejects[0].size > MAX_VIDEO_BYTES
           ? `${rejects[0].name} exceeds the 5 GB limit (${formatBytes(rejects[0].size)}).`
-          : `Skipped invalid files: ${rejects.map((r) => r.name).join(', ')}. Use MP4, MOV, or other video formats under 5 GB.`
+          : `Skipped invalid files: ${rejects.map((r) => r.name).join(', ')}. Use MP4, MOV, M4V, WEBM, or supported audio under 5 GB.`
       );
     }
 
+    if (accepts.length > 1) {
+      setVideoError((prev) => (
+        prev
+          ? `${prev} Only one recording is supported per live case right now; using ${accepts[0].name}.`
+          : `Only one recording is supported per live case right now; using ${accepts[0].name}.`
+      ));
+    }
+
     if (accepts.length) {
-      setVideos((prev) =>
-        renumberVideos([
-          ...prev,
-          ...accepts.map((file) => ({
-            id: makeFileId(file),
-            file,
-            slot: prev.length + 1,
-            label: '',
-          })),
-        ])
-      );
+      const file = accepts[0];
+      setVideos(renumberVideos([{
+        id: makeFileId(file),
+        file,
+        slot: 1,
+        label: '',
+      }]));
     }
   };
 
@@ -667,16 +671,16 @@ function StepVideos({ videos, error, onAdd, onRemove, onSetLabel, inputRef, disa
     <div>
       <SectionHeader
         title="Examination videos"
-        subtitle="Upload one or more CME recordings. Multiple segments (e.g. morning and afternoon sessions) are supported."
+        subtitle="Upload one CME recording for this production workflow. If the exam is split across files, combine the segments into one file first."
       />
       <DropZone
         accept={VIDEO_ACCEPT}
-        multiple
+        multiple={false}
         onFiles={onAdd}
         inputRef={inputRef}
         icon={VideoIcon}
         title="Drag and drop examination videos"
-        subtitle="MP4, MOV, M4V, MPG, AVI, MKV, WEBM · up to 5 GB each"
+        subtitle="MP4, MOV, M4V, WEBM, or audio (MP3, M4A, WAV, FLAC) · up to 5 GB each"
         accent="indigo"
         disabled={disabled}
       />
@@ -688,7 +692,7 @@ function StepVideos({ videos, error, onAdd, onRemove, onSetLabel, inputRef, disa
               {videos.length} video{videos.length !== 1 ? 's' : ''} attached
             </span>
             <Button variant="ghost" size="sm" onClick={() => inputRef.current?.click()} disabled={disabled}>
-              Add more
+              Replace
             </Button>
           </div>
           {videos.map((v, i) => (

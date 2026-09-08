@@ -584,16 +584,32 @@ _VIDEO_AUDIO_CONTENT_TYPES = {
     '.mp4': 'video/mp4',
     '.m4v': 'video/mp4',
     '.mov': 'video/quicktime',
-    '.mpg': 'video/mpeg',
-    '.mpeg': 'video/mpeg',
-    '.avi': 'video/x-msvideo',
-    '.mkv': 'video/x-matroska',
     '.webm': 'video/webm',
     '.mp3': 'audio/mpeg',
     '.m4a': 'audio/mp4',
     '.wav': 'audio/wav',
     '.flac': 'audio/flac',
+    '.ogg': 'audio/ogg',
+    '.amr': 'audio/amr',
 }
+
+SUPPORTED_RECORDING_CONTENT_TYPES = {
+    'video/mp4',
+    'video/quicktime',
+    'video/webm',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/wav',
+    'audio/wave',
+    'audio/x-wav',
+    'audio/flac',
+    'audio/ogg',
+    'audio/amr',
+}
+
+UNSUPPORTED_RECORDING_EXTENSIONS = ('.mpg', '.mpeg', '.avi', '.mkv', '.wmv', '.flv')
 
 
 def _infer_content_type(filename: str, content_type: str) -> str:
@@ -606,13 +622,21 @@ def _infer_content_type(filename: str, content_type: str) -> str:
         return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     if lower.endswith('.doc'):
         return 'application/msword'
-    # Browsers frequently report an empty MIME type for less common video
-    # containers (.mpg, .mkv, ...); infer from the extension so valid videos
-    # are not rejected as "must be video or audio format".
+    # Browsers frequently report an empty MIME type; infer from extensions
+    # that are supported by both the upload flow and AWS Transcribe.
     for ext, inferred in _VIDEO_AUDIO_CONTENT_TYPES.items():
         if lower.endswith(ext):
             return inferred
     return content_type or 'application/octet-stream'
+
+
+def _unsupported_recording_reason(filename: str, content_type: str) -> Optional[str]:
+    lower = (filename or '').lower()
+    if lower.endswith(UNSUPPORTED_RECORDING_EXTENSIONS):
+        return 'MPEG, AVI, MKV, WMV, and FLV require a conversion worker that is not enabled for production uploads yet.'
+    if content_type not in SUPPORTED_RECORDING_CONTENT_TYPES:
+        return f'Unsupported media type: {content_type}'
+    return None
 
 
 def _recording_slot_as_int(val: Any) -> Optional[int]:
@@ -817,7 +841,7 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
         session_id = body.get('session_id')
         upload_kind = (body.get('upload_kind') or body.get('upload_type') or 'recording').lower()
         filename = body.get('filename', 'recording.mp4')
-        content_type = _infer_content_type(filename, (body.get('content_type') or '').strip())
+        content_type = _infer_content_type(filename, (body.get('content_type') or '').strip()).lower()
         file_size = body.get('file_size', 0)
         recording_slot_raw = body.get('recording_slot')
 
@@ -888,6 +912,16 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
 
         recording_rules = session.get('recording_allowed', {})
 
+        unsupported_reason = _unsupported_recording_reason(filename, content_type)
+        if unsupported_reason:
+            return create_response(415, {
+                'error': (
+                    f'{unsupported_reason} Please convert the recording to MP4, MOV, M4V, WEBM, '
+                    'or upload supported audio (MP3, M4A, WAV, FLAC, OGG, AMR).'
+                ),
+                'content_type': content_type,
+            })
+
         if is_video and not recording_rules.get('video'):
             return create_response(403, {
                 'error': f"Video recording not permitted in {session.get('state')}",
@@ -926,9 +960,14 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
         }
 
         if recording_slot_raw is not None and recording_slot_raw != '':
-            recording_slot = int(recording_slot_raw)
-            if recording_slot < 1:
-                return create_response(400, {'error': 'recording_slot must be >= 1'})
+            try:
+                recording_slot = int(recording_slot_raw)
+            except (TypeError, ValueError):
+                return create_response(400, {'error': 'recording_slot must be 1'})
+            if recording_slot != 1:
+                return create_response(400, {
+                    'error': 'Only one recording is supported per live case right now. Use recording_slot=1.',
+                })
             if recording_slot in used_slots:
                 # Idempotent replace: slots are registered at presign time, so a
                 # failed/retried browser upload re-requests the same slot. Drop
@@ -940,10 +979,16 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
                 logger.info(
                     f"Replacing recording slot {recording_slot} for session {session_id}"
                 )
+            elif session_recordings:
+                return create_response(409, {
+                    'error': 'Only one recording is supported per live case right now. Replace Video 1 or create a new case.',
+                })
         else:
+            if session_recordings:
+                return create_response(409, {
+                    'error': 'Only one recording is supported per live case right now. Replace Video 1 or create a new case.',
+                })
             recording_slot = 1
-            while recording_slot in used_slots:
-                recording_slot += 1
 
         new_recording = {
             'uri': f"s3://{S3_BUCKET}/{s3_key}",
@@ -987,7 +1032,7 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
             'recording_index': len(session_recordings) - 1,
             'total_recordings': len(session_recordings),
             'expires_in': 7200,
-            'message': 'Upload recording to this URL. Order follows Video 1, Video 2, ...',
+            'message': 'Upload the case recording to this URL.',
         })
 
     except Exception as e:
@@ -1015,7 +1060,7 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
         if not session:
             return create_response(404, {'error': 'CME session not found'})
         
-        # Get recordings list (support both old single video_uri and new recordings list)
+        # Get recordings list (support old single video_uri storage)
         recordings = session.get('recordings', [])
         if not recordings and session.get('video_uri'):
             # Migrate old format to new format
@@ -1028,6 +1073,10 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
         
         if not recordings:
             return create_response(400, {'error': 'No recordings uploaded for this session'})
+        if len(recordings) > 1:
+            return create_response(409, {
+                'error': 'Only one recording is supported per live case right now. Combine segments into one file before processing.',
+            })
 
         def _sort_recordings(recs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             def key_fn(ir: tuple) -> tuple:
@@ -1045,6 +1094,40 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
 
         recordings = _sort_recordings(recordings)
 
+        missing_uploads = []
+        for recording in recordings:
+            video_uri = recording.get('uri') or recording.get('s3_key') or ''
+            parsed = _s3_bucket_key_from_uri(video_uri)
+            if not parsed:
+                missing_uploads.append({
+                    'filename': recording.get('filename') or 'recording',
+                    'reason': 'missing_s3_key',
+                })
+                continue
+            bucket, key = parsed
+            try:
+                s3_client.head_object(Bucket=bucket, Key=key)
+            except Exception as head_err:
+                error_code = (
+                    head_err.response.get('Error', {}).get('Code', '')
+                    if hasattr(head_err, 'response') and head_err.response
+                    else ''
+                )
+                if error_code in ('404', 'NoSuchKey', 'NotFound'):
+                    missing_uploads.append({
+                        'filename': recording.get('filename') or key,
+                        's3_key': key,
+                        'reason': 'upload_not_found',
+                    })
+                    continue
+                raise
+
+        if missing_uploads:
+            return create_response(409, {
+                'error': 'One or more recording uploads have not finished. Please retry the upload before starting processing.',
+                'missing_recordings': missing_uploads,
+            })
+
         # Update session status
         sessions_table.update_item(
             Key={'session_id': session_id},
@@ -1059,7 +1142,7 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
         
-        # Process all recordings - start transcription for each
+        # Process the single production recording.
         transcription_jobs = []
         video_s3_keys = []
         
@@ -1077,13 +1160,17 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 s3_key = video_uri
             video_s3_keys.append(s3_key)
+
+        failed_transcriptions = [j for j in transcription_jobs if not j.get('job_name')]
+        if failed_transcriptions:
+            first_error = failed_transcriptions[0].get('error') or failed_transcriptions[0].get('message') or 'unknown error'
+            raise RuntimeError(
+                f"Could not start transcription for {len(failed_transcriptions)} recording(s): {first_error}"
+            )
         
         # *** START STEP FUNCTION WORKFLOW ***
-        # For multiple files, we need to:
-        # 1. Wait for all transcriptions to complete
-        # 2. Combine transcripts
-        # 3. Process combined transcript
-        # 4. Process video analysis for all videos
+        # The Step Functions workflow is intentionally single-recording until
+        # timestamp alignment for combined transcripts is implemented.
         
         valid_jobs = [j for j in transcription_jobs if j.get('job_name')]
         sessions_table.update_item(
@@ -1271,7 +1358,7 @@ def start_transcription_job(session: Dict[str, Any], recording_index: int = 0) -
     Step 3: Speech-to-Text & Speaker Diarization
     Start AWS Transcribe Medical job with speaker identification
     Handles MPEG/MPG files by converting to MP3 first (Transcribe doesn't support MPEG)
-    Supports multiple recordings per session via recording_index
+    The production workflow currently supports one recording per session.
     """
     try:
         session_id = session['session_id']
@@ -1292,6 +1379,16 @@ def start_transcription_job(session: Dict[str, Any], recording_index: int = 0) -
         
         # Detect media format from file extension
         file_extension = key.split('.')[-1].lower() if '.' in key else 'mp4'
+
+        if file_extension in {'mpeg', 'mpg', 'avi', 'mkv', 'wmv', 'flv'}:
+            return {
+                'error': (
+                    f'Unsupported media extension for production transcription: .{file_extension}. '
+                    'Convert the recording to MP4, MOV, M4V, WEBM, or supported audio before upload.'
+                ),
+                'job_name': None,
+                'status': 'FAILED',
+            }
         
         # Check if there's already a conversion job in progress or complete
         conversion_job_id = session.get('conversion_job_id')
@@ -1375,7 +1472,13 @@ def start_transcription_job(session: Dict[str, Any], recording_index: int = 0) -
                 'm4a': 'mp4',
                 'mov': 'mp4'
             }
-            media_format = format_mapping.get(file_extension, 'mp4')
+            media_format = format_mapping.get(file_extension)
+            if not media_format:
+                return {
+                    'error': f'Unsupported media extension for transcription: .{file_extension}',
+                    'job_name': None,
+                    'status': 'FAILED',
+                }
         
         # Use Medical Transcribe for better medical vocabulary (now that MPEG is converted)
         use_medical = True
@@ -1490,10 +1593,25 @@ def create_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _log_request_summary(event: Dict[str, Any]) -> None:
+    """Log routing metadata without Authorization headers or request bodies."""
+    headers = event.get('headers') or {}
+    origin = headers.get('origin') or headers.get('Origin') or ''
+    request_context = event.get('requestContext') or {}
+    logger.info(json.dumps({
+        'message': 'CME API request',
+        'request_id': request_context.get('requestId'),
+        'http_method': event.get('httpMethod', 'POST'),
+        'path': event.get('path', '/'),
+        'origin': origin,
+        'has_body': bool(event.get('body')),
+    }))
+
+
 def handler(event, context):
     """Main Lambda handler for CME operations"""
     try:
-        logger.info(f"CME Handler - Event: {json.dumps(event)}")
+        _log_request_summary(event)
         
         # Parse request
         http_method = event.get('httpMethod', 'POST')
@@ -1540,4 +1658,3 @@ def handler(event, context):
         import traceback
         logger.error(traceback.format_exc())
         return create_response(500, {'error': str(e)})
-

@@ -1273,7 +1273,12 @@ def generate_report(event, context):
     """
     session_id = None
     try:
-        logger.info(f"Report Generator invoked: {json.dumps(event)}")
+        logger.info(json.dumps({
+            'message': 'Report Generator invoked',
+            'request_id': getattr(context, 'aws_request_id', None),
+            'session_id': event.get('session_id') if isinstance(event, dict) else None,
+            'format': event.get('format', 'html') if isinstance(event, dict) else 'html',
+        }))
         
         session_id = event.get('session_id')
         format = event.get('format', 'html')

@@ -24,6 +24,15 @@ export default function Dashboard() {
         setCases(list);
         setSource(src);
         if (err) setError('Live API unavailable. Showing local cases only.');
+      } catch (err) {
+        if (cancelled) return;
+        setCases([]);
+        setSource('');
+        if (err.response?.status === 401) {
+          setError('Your session expired. Redirecting to sign in.');
+        } else {
+          setError('Unable to load cases from the live API. Please refresh after the connection is restored.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -215,7 +224,7 @@ function CaseCard({ caseData, index }) {
 }
 
 function EmptyState({ onNew, source }) {
-  const liveEmpty = source === 'live' || source === 'mock-fallback';
+  const liveEmpty = source === 'live';
   return (
     <div className="mt-6 rounded-2xl border-2 border-dashed border-emerald-200/80 bg-gradient-to-b from-white to-emerald-50/30 p-12 sm:p-16 text-center">
       <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">

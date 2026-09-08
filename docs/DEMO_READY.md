@@ -20,7 +20,7 @@ Open **http://localhost:3000**
 | Variable | Value |
 |----------|--------|
 | `REACT_APP_API_URL` | `https://g4dzem9rtk.execute-api.us-east-1.amazonaws.com/prod` |
-| `REACT_APP_DEV_MODE` | `true` |
+| `REACT_APP_DEV_MODE` | `false` for live production demos |
 | `REACT_APP_USE_MOCK_API` | `false` |
 
 Footer should show **Live API** (not “Mock API”).
@@ -38,7 +38,8 @@ Footer should show **Live API** (not “Mock API”).
 > `cme-analysis-users` pool credentials. Dev mode still works fully with
 > the mock API (`REACT_APP_USE_MOCK_API=true`).
 
-Dev mode (`REACT_APP_DEV_MODE=true`): app auto-signs in as **Demo Reviewer** — mock API only.
+Dev mode (`REACT_APP_DEV_MODE=true`): app auto-signs in as **Demo Reviewer** in
+local development only — mock API only. Production builds ignore dev mode.
 
 ---
 
