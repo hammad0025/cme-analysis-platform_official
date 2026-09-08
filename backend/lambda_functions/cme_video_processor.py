@@ -25,6 +25,28 @@ s3_client = boto3.client('s3')
 rekognition_client = boto3.client('rekognition')
 bedrock_client = boto3.client('bedrock-runtime', region_name='us-east-1')
 
+DEFAULT_BEDROCK_VIDEO_MODEL_ID = os.environ.get(
+    'CME_BEDROCK_MODEL_ID',
+    'amazon.nova-lite-v1:0'
+)
+DEFAULT_ANTHROPIC_MODEL_ID = os.environ.get(
+    'CME_BEDROCK_ANTHROPIC_MODEL_ID',
+    'us.anthropic.claude-sonnet-5'
+)
+VALID_MOTION_PRESENT = {'performed', 'brief', 'not_observed', 'analysis_unavailable'}
+VALID_POSE_MATCH = {'full_match', 'partial', 'no_match', 'unknown'}
+BEDROCK_VIDEO_FORMATS = {
+    'flv': 'flv',
+    'mkv': 'mkv',
+    'mov': 'mov',
+    'mp4': 'mp4',
+    'm4v': 'mp4',
+    'mpeg': 'mpeg',
+    'mpg': 'mpg',
+    'webm': 'webm',
+    'wmv': 'wmv',
+}
+
 # Import comprehensive knowledge base derived from Reference PDFs A-Y
 try:
     from cme_exam_knowledge_base import (
@@ -695,6 +717,7 @@ def process_video_for_cme_test(
         # FFmpeg not available - analyze full video with Rekognition
         # Use the full video and check for motion/people around the test timestamp
         segment_key = video_s3_key  # Use full video
+    video_is_segment = segment_key != video_s3_key
     
     # Step 6: Analyze the segment (or full video if segment extraction failed)
     analysis = processor.analyze_video_segment(segment_key, test_type)
@@ -737,7 +760,14 @@ def process_video_for_cme_test(
     analysis_result = {}
     try:
         analysis_result = analyze_with_bedrock(
-            test_type, test_timestamp, transcript_excerpt, motion_labels, person_count
+            test_type,
+            test_timestamp,
+            transcript_excerpt,
+            motion_labels,
+            person_count,
+            video_s3_key=segment_key,
+            s3_bucket=s3_bucket,
+            video_is_segment=video_is_segment,
         )
         motion_present = analysis_result['motion_present']
         pose_match = analysis_result['pose_match']
@@ -754,14 +784,24 @@ def process_video_for_cme_test(
 
     analysis_details = {
         'segment_key': segment_key,
+        'video_is_segment': video_is_segment,
         'test_type': test_type,
         'motion_job_id': motion_job_id,
         'pose_job_id': pose_job_id,
         'motion_labels': extract_motion_labels(motion_result) if motion_result else [],
         'person_count': count_persons(pose_result) if pose_result else 0
     }
-    if analysis_result.get('analysis_error'):
-        analysis_details['analysis_error'] = analysis_result['analysis_error']
+    for detail_key in (
+        'analysis_error',
+        'provider',
+        'model_id',
+        'reasoning',
+        'observed_evidence',
+        'missing_evidence',
+        'video_format',
+    ):
+        if analysis_result.get(detail_key) is not None:
+            analysis_details[detail_key] = analysis_result[detail_key]
     
     # *** PERSIST OBSERVED ACTION TO DYNAMODB ***
     action_id = f"action_{int(time.time())}"
@@ -1174,21 +1214,258 @@ Analyze and return JSON:
     }
 
 
+def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+    """Parse the first JSON object from a model response."""
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    json_match = re.search(r'\{[\s\S]*\}', text)
+    if not json_match:
+        return None
+    try:
+        parsed = json.loads(json_match.group())
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _clamp_confidence(value: Any, default: float = 0.0) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        confidence = default
+    return max(0.0, min(1.0, confidence))
+
+
+def _video_format_for_key(video_s3_key: str) -> Optional[str]:
+    extension = (video_s3_key.rsplit('.', 1)[-1] if '.' in video_s3_key else '').lower()
+    return BEDROCK_VIDEO_FORMATS.get(extension)
+
+
+def _normalize_video_verdict(analysis: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+    raw_motion = analysis.get('motion_present')
+    if raw_motion is None and 'performed' in analysis:
+        raw_motion = 'performed' if analysis.get('performed') else 'not_observed'
+
+    motion = str(raw_motion or '').strip().lower().replace('-', '_').replace(' ', '_')
+    motion_aliases = {
+        'partial': 'brief',
+        'partially_performed': 'brief',
+        'not_seen': 'not_observed',
+        'not_observed_in_video': 'not_observed',
+        'unavailable': 'analysis_unavailable',
+        'unknown': 'analysis_unavailable',
+    }
+    motion = motion_aliases.get(motion, motion)
+    if motion not in VALID_MOTION_PRESENT:
+        motion = 'analysis_unavailable'
+
+    raw_pose = str(analysis.get('pose_match') or '').strip().lower().replace('-', '_').replace(' ', '_')
+    pose_aliases = {
+        'match': 'full_match',
+        'matched': 'full_match',
+        'partial_match': 'partial',
+        'partially_matches': 'partial',
+        'none': 'no_match',
+        'not_applicable': 'unknown',
+    }
+    pose_match = pose_aliases.get(raw_pose, raw_pose)
+    if pose_match not in VALID_POSE_MATCH:
+        pose_match = 'unknown'
+
+    confidence = _clamp_confidence(
+        analysis.get('confidence', analysis.get('confidence_score', 0.0)),
+        default=0.0 if motion == 'analysis_unavailable' else 0.5
+    )
+    if motion == 'analysis_unavailable':
+        confidence = 0.0
+
+    return {
+        'motion_present': motion,
+        'pose_match': pose_match,
+        'confidence': confidence,
+        'reasoning': str(analysis.get('reasoning') or analysis.get('summary') or '').strip(),
+        'observed_evidence': analysis.get('observed_evidence') or [],
+        'missing_evidence': analysis.get('missing_evidence') or [],
+        'provider': 'bedrock',
+        'model_id': model_id,
+    }
+
+
+def _build_video_verdict_prompt(
+    test_type: str,
+    test_timestamp: float,
+    transcript_excerpt: str,
+    motion_labels: list,
+    person_count: int,
+    video_is_segment: bool
+) -> str:
+    expectations = TEST_MOTION_EXPECTATIONS.get(test_type, {})
+    expected_movements = expectations.get('expected_movements', [])
+    timing_instruction = (
+        'The attached video is the extracted test window, so evaluate the visible activity in this clip.'
+        if video_is_segment
+        else (
+            f'The attached video may be the full recording. Focus on the area around '
+            f'{test_timestamp:.1f} seconds if the model can localize the video timeline. '
+            'If you cannot confidently evaluate that point in the recording, return analysis_unavailable.'
+        )
+    )
+
+    return f"""You are verifying a Compulsory Medical Examination video for a legal evidence workflow.
+
+Task: decide whether the declared exam action is visually supported by the attached video.
+
+Declared test: {test_type}
+Declared transcript timestamp: {test_timestamp:.1f} seconds
+Transcript excerpt: "{transcript_excerpt}"
+Expected visual movements: {', '.join(expected_movements) if expected_movements else 'not specified'}
+Patient motion required: {expectations.get('patient_motion_required', 'unknown')}
+Examiner touch required: {expectations.get('examiner_touch', 'unknown')}
+Auxiliary motion labels: {', '.join(motion_labels[:10]) if motion_labels else 'none'}
+Detected person count from auxiliary tools: {person_count}
+
+{timing_instruction}
+
+Rules:
+- Use the video evidence as the source of truth.
+- Do not mark performed or not_observed from transcript wording alone.
+- Return analysis_unavailable when the clip, angle, resolution, timestamp, or model access prevents a reliable visual decision.
+- Mark brief only when some exam movement is visible but the action is too limited or incomplete for a full match.
+
+Return JSON only:
+{{
+  "motion_present": "performed|brief|not_observed|analysis_unavailable",
+  "pose_match": "full_match|partial|no_match|unknown",
+  "confidence": 0.0,
+  "reasoning": "one sentence tied to visible evidence",
+  "observed_evidence": ["short visual facts"],
+  "missing_evidence": ["short gaps or uncertainties"]
+}}"""
+
+
+def _analyze_video_with_nova(
+    *,
+    model_id: str,
+    test_type: str,
+    test_timestamp: float,
+    transcript_excerpt: str,
+    motion_labels: list,
+    person_count: int,
+    video_s3_key: str,
+    s3_bucket: str,
+    video_is_segment: bool,
+) -> Dict[str, Any]:
+    video_format = _video_format_for_key(video_s3_key)
+    if not video_format:
+        return {
+            'motion_present': 'analysis_unavailable',
+            'pose_match': 'unknown',
+            'confidence': 0.0,
+            'analysis_error': 'unsupported_video_format_for_bedrock',
+            'provider': 'bedrock',
+            'model_id': model_id,
+        }
+
+    if not hasattr(bedrock_client, 'converse'):
+        raise RuntimeError('bedrock_converse_api_unavailable')
+
+    prompt = _build_video_verdict_prompt(
+        test_type,
+        test_timestamp,
+        transcript_excerpt,
+        motion_labels,
+        person_count,
+        video_is_segment,
+    )
+    video_uri = f"s3://{s3_bucket}/{video_s3_key}"
+    response = bedrock_client.converse(
+        modelId=model_id,
+        messages=[{
+            'role': 'user',
+            'content': [
+                {'text': prompt},
+                {
+                    'video': {
+                        'format': video_format,
+                        'source': {
+                            's3Location': {
+                                'uri': video_uri,
+                            }
+                        }
+                    }
+                },
+            ],
+        }],
+        inferenceConfig={
+            'maxTokens': 500,
+            'temperature': 0,
+        },
+    )
+
+    content_blocks = (
+        response.get('output', {})
+        .get('message', {})
+        .get('content', [])
+    )
+    content_text = '\n'.join(
+        block.get('text', '')
+        for block in content_blocks
+        if isinstance(block, dict) and block.get('text')
+    )
+    parsed = _extract_json_object(content_text)
+    if not parsed:
+        raise ValueError('bedrock_nova_returned_unparseable_json')
+
+    verdict = _normalize_video_verdict(parsed, model_id)
+    verdict['video_uri'] = video_uri
+    verdict['video_format'] = video_format
+    return verdict
+
+
 def analyze_with_bedrock(
     test_type: str,
     test_timestamp: float,
     transcript_excerpt: str,
     motion_labels: list,
-    person_count: int
+    person_count: int,
+    video_s3_key: Optional[str] = None,
+    s3_bucket: Optional[str] = None,
+    video_is_segment: bool = False,
 ) -> Dict[str, Any]:
     """
-    Use Bedrock/Claude to intelligently determine if test was performed.
-    Matches Dr. Hunter's analysis methodology.
+    Use Bedrock to intelligently determine if test was performed.
     
-    For cervical/lumbar ROM tests, uses specialized detailed analysis.
+    Prefer Amazon Nova video understanding because it is enabled in this AWS
+    account and can evaluate S3 video inputs through Converse. Anthropic Claude
+    remains as a legacy text-only fallback when explicitly configured.
     """
-    # Use specialized analysis for ROM tests
-    if test_type in ['cervical_rom', 'neck_rom', 'cervical_range_of_motion']:
+    model_id = os.environ.get('CME_BEDROCK_MODEL_ID', DEFAULT_BEDROCK_VIDEO_MODEL_ID)
+    if model_id.startswith('amazon.nova') and video_s3_key and s3_bucket:
+        try:
+            return _analyze_video_with_nova(
+                model_id=model_id,
+                test_type=test_type,
+                test_timestamp=test_timestamp,
+                transcript_excerpt=transcript_excerpt,
+                motion_labels=motion_labels,
+                person_count=person_count,
+                video_s3_key=video_s3_key,
+                s3_bucket=s3_bucket,
+                video_is_segment=video_is_segment,
+            )
+        except Exception as e:
+            logger.warning(f"Bedrock Nova video analysis failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    elif model_id.startswith('amazon.nova'):
+        logger.warning("Bedrock Nova selected but no S3 video key/bucket was provided")
+    elif test_type in ['cervical_rom', 'neck_rom', 'cervical_range_of_motion']:
         detailed = analyze_cervical_rom_detailed(
             test_timestamp, transcript_excerpt, motion_labels, person_count
         )
@@ -1211,8 +1488,13 @@ Dr. Hunter found 27/64 performed (42%). Hands-on period: 907-1661s.
 Was this test ACTUALLY PERFORMED? Return JSON:
 {{"performed": true/false, "confidence": 0.0-1.0, "reasoning": "why"}}"""
         
+        anthropic_model_id = (
+            model_id
+            if model_id.startswith(('anthropic.', 'us.anthropic.'))
+            else DEFAULT_ANTHROPIC_MODEL_ID
+        )
         response = bedrock_client.invoke_model(
-            modelId='us.anthropic.claude-sonnet-5',
+            modelId=anthropic_model_id,
             body=json.dumps({
                 'anthropic_version': 'bedrock-2023-05-31',
                 # Sonnet 5 enables adaptive thinking by default and thinking
@@ -1236,7 +1518,10 @@ Was this test ACTUALLY PERFORMED? Return JSON:
             return {
                 'motion_present': 'performed' if performed else 'not_observed',
                 'pose_match': 'full_match' if performed else 'no_match',
-                'confidence': confidence
+                'confidence': confidence,
+                'provider': 'bedrock',
+                'model_id': anthropic_model_id,
+                'reasoning': str(analysis.get('reasoning') or '').strip(),
             }
     except Exception as e:
         logger.warning(f"Bedrock error: {e}")

@@ -73,6 +73,7 @@ export default function NewCase() {
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState({});
   const [submitError, setSubmitError] = useState('');
+  const [submitPhase, setSubmitPhase] = useState('');
   const cancelRefs = useRef([]);
   const inFlightCaseId = useRef(null);
 
@@ -201,10 +202,7 @@ export default function NewCase() {
       setVideoError('Please attach at least one examination video before continuing.');
       return;
     }
-    if (step === 3 && reports.length === 0) {
-      setReportError('Please attach at least one PDF report before continuing.');
-      return;
-    }
+    if (step === 3) setReportError('');
     setStep(target);
   };
 
@@ -272,7 +270,7 @@ export default function NewCase() {
   const setReportType = (id, type) =>
     setReports((prev) => prev.map((r) => (r.id === id ? { ...r, type } : r)));
 
-  const canSubmit = metadataValid && videos.length > 0 && reports.length > 0 && !submitting;
+  const canSubmit = metadataValid && videos.length > 0 && !submitting;
 
   const overallPercent = useMemo(() => {
     const values = Object.values(progress);
@@ -296,6 +294,7 @@ export default function NewCase() {
   const onSubmit = async () => {
     if (!canSubmit) return;
     setSubmitError('');
+    setSubmitPhase('Preparing case record...');
     setSubmitting(true);
     setProgress({});
     cancelRefs.current = [];
@@ -326,6 +325,7 @@ export default function NewCase() {
 
       const uploadedRefs = [];
       for (const task of fileTasks) {
+        setSubmitPhase(`Uploading ${task.displayLabel || task.file.name}...`);
         const ref = await uploadWithRetry(createdCase.case_id, task, setProgress, cancelRefs);
         uploadedRefs.push({ ...task, ...ref });
       }
@@ -358,12 +358,14 @@ export default function NewCase() {
         });
       }
 
+      setSubmitPhase('Starting analysis pipeline...');
       await startProcessing({
         caseId: createdCase.case_id,
         videos: videoRefs,
         reports: reportRefs,
       });
 
+      setSubmitPhase('Opening case dashboard...');
       inFlightCaseId.current = null;
       navigate(`/cases/${createdCase.case_id}`);
     } catch (err) {
@@ -376,6 +378,7 @@ export default function NewCase() {
       } else {
         setSubmitError(err?.message || 'Upload failed. Please try again.');
       }
+      setSubmitPhase('');
       inFlightCaseId.current = null;
       setSubmitting(false);
     }
@@ -460,6 +463,7 @@ export default function NewCase() {
                     progress={progress}
                     overallPercent={overallPercent}
                     submitError={submitError}
+                    submitPhase={submitPhase}
                     mock={mock}
                   />
                 )}
@@ -476,6 +480,7 @@ export default function NewCase() {
               if (submitting) {
                 cancelAll();
                 setSubmitting(false);
+                setSubmitPhase('');
                 setSubmitError('Upload cancelled. The case was discarded.');
                 return;
               }
@@ -499,7 +504,7 @@ export default function NewCase() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Uploading…
+                    Working…
                   </>
                 ) : (
                   'Submit case'
@@ -529,7 +534,11 @@ async function uploadWithRetry(caseId, task, setProgress, cancelRefs) {
       onProgress: ({ percent }) => setProgress((prev) => ({ ...prev, [task.key]: percent })),
     });
     cancelRefs.current.push(cancel);
-    await promise;
+    try {
+      await promise;
+    } finally {
+      cancelRefs.current = cancelRefs.current.filter((fn) => fn !== cancel);
+    }
     return { file_key: presigned.file_key, recording_slot: presigned.recording_slot };
   };
 
@@ -538,7 +547,13 @@ async function uploadWithRetry(caseId, task, setProgress, cancelRefs) {
   } catch (err) {
     if (/cancelled/i.test(err?.message)) throw err;
     setProgress((prev) => ({ ...prev, [task.key]: 0 }));
-    return await attempt();
+    try {
+      return await attempt();
+    } catch (retryErr) {
+      if (/cancelled/i.test(retryErr?.message)) throw retryErr;
+      const reason = retryErr?.message || err?.message || 'Upload failed after retry.';
+      throw new Error(`${task.file.name}: ${reason}`);
+    }
   }
 }
 
@@ -710,7 +725,7 @@ function StepReports({ reports, error, onAdd, onRemove, onSetType, inputRef, dis
     <div>
       <SectionHeader
         title="Reports & documents"
-        subtitle="Attach the defense expert report, initial IME, medical history, and any supporting PDFs. Tag each document for proper routing."
+        subtitle="Optional PDFs can improve claim matching, but video-only cases can still be submitted. Tag each document for proper routing."
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -728,7 +743,7 @@ function StepReports({ reports, error, onAdd, onRemove, onSetType, inputRef, dis
         onFiles={onAdd}
         inputRef={inputRef}
         icon={PdfIcon}
-        title="Drag and drop PDF reports"
+        title="Drag and drop optional PDF reports"
         subtitle="Defense expert report, IME, medical history, and supporting documents"
         accent="purple"
         disabled={disabled}
@@ -774,7 +789,7 @@ function StepReports({ reports, error, onAdd, onRemove, onSetType, inputRef, dis
   );
 }
 
-function StepReview({ metadata, videos, reports, submitting, progress, overallPercent, submitError, mock }) {
+function StepReview({ metadata, videos, reports, submitting, progress, overallPercent, submitError, submitPhase, mock }) {
   return (
     <div>
       <SectionHeader
@@ -818,7 +833,7 @@ function StepReview({ metadata, videos, reports, submitting, progress, overallPe
             label="Reports"
             value={
               reports.length === 0 ? (
-                <span className="text-slate-400">None</span>
+                <span className="text-slate-400">None attached; video-only processing will run</span>
               ) : (
                 <ul className="space-y-1.5">
                   {reports.map((r) => (
@@ -838,7 +853,7 @@ function StepReview({ metadata, videos, reports, submitting, progress, overallPe
       {submitting && (
         <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50 p-6 mb-4">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-indigo-900">Uploading materials…</span>
+            <span className="text-sm font-semibold text-indigo-900">{submitPhase || 'Uploading materials...'}</span>
             <span className="text-sm font-mono font-semibold text-indigo-700">{Math.round(overallPercent)}%</span>
           </div>
           <ProgressBar percent={overallPercent} />

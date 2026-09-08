@@ -279,7 +279,8 @@ class CMEAnalysisPlatformStack(Stack):
             environment={
                 "CME_SESSIONS_TABLE": sessions_table.table_name,
                 "CME_STEPS_TABLE": steps_table.table_name,
-                "CME_DEMEANOR_TABLE": demeanor_table.table_name
+                "CME_DEMEANOR_TABLE": demeanor_table.table_name,
+                "CME_NLP_MODEL_ID": "amazon.nova-lite-v1:0"
             }
         )
 
@@ -296,7 +297,8 @@ class CMEAnalysisPlatformStack(Stack):
             role=lambda_role,
             environment={
                 "S3_BUCKET": cme_bucket.bucket_name,
-                "CME_ACTIONS_TABLE": actions_table.table_name
+                "CME_ACTIONS_TABLE": actions_table.table_name,
+                "CME_BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0"
             }
         )
 
@@ -414,5 +416,3 @@ class CMEAnalysisPlatformStack(Stack):
         self.user_pool_client_id = user_pool_client.user_pool_client_id
         self.bucket_name = cme_bucket.bucket_name
         self.state_machine_arn = state_machine.state_machine_arn
-
-

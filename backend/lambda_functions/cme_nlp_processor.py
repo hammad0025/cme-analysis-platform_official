@@ -6,6 +6,7 @@ Implements Steps 4 & 7 from the technical documentation
 import json
 import boto3
 import logging
+import os
 import re
 from typing import Dict, Any, List, Tuple, Optional
 from decimal import Decimal
@@ -17,6 +18,12 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 comprehend_client = boto3.client('comprehend')
 bedrock_client = boto3.client('bedrock-runtime')
+
+DEFAULT_NLP_MODEL_ID = os.environ.get('CME_NLP_MODEL_ID', 'amazon.nova-lite-v1:0')
+DEFAULT_NLP_ANTHROPIC_MODEL_ID = os.environ.get(
+    'CME_NLP_ANTHROPIC_MODEL_ID',
+    'us.anthropic.claude-sonnet-5'
+)
 
 # Comprehensive Medical Test Taxonomy for CME/IME Detection
 # Based on common physical examination tests in medico-legal contexts
@@ -1097,8 +1104,8 @@ class CMENLPProcessor:
                 
                 examiner_text = ' '.join(examiner_text_parts)
                 
-                # Use AI to detect tests from examiner speech - PROCESS FULL TRANSCRIPT
-                # Cost is not an issue - process in chunks if needed
+                # Use AI to detect tests from examiner speech while keeping
+                # each model request bounded for latency and cost.
                 max_chunk_size = 20000  # Larger chunks for better context
                 ai_tests = []
                 
@@ -1559,12 +1566,88 @@ def process_transcript_for_cme_analysis(
     }
 
 
+def _extract_json_array_from_model_text(text: str) -> List[Dict[str, Any]]:
+    if not text:
+        return []
+
+    cleaned = text.strip()
+    if cleaned.startswith('```'):
+        lines = cleaned.split('\n')
+        cleaned = '\n'.join(line for line in lines if not line.startswith('```')).strip()
+    if cleaned.startswith('json'):
+        cleaned = cleaned[4:].strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        json_match = re.search(r'\[[\s\S]*\]', cleaned)
+        if not json_match:
+            return []
+        try:
+            parsed = json.loads(json_match.group())
+        except json.JSONDecodeError:
+            return []
+
+    if isinstance(parsed, dict):
+        parsed = parsed.get('tests') or parsed.get('items') or []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _invoke_test_detection_model(prompt: str, model_id: str) -> str:
+    if model_id.startswith('amazon.nova'):
+        if not hasattr(bedrock_client, 'converse'):
+            raise RuntimeError('bedrock_converse_api_unavailable')
+        response = bedrock_client.converse(
+            modelId=model_id,
+            messages=[{
+                'role': 'user',
+                'content': [{'text': prompt}],
+            }],
+            inferenceConfig={
+                'maxTokens': 4000,
+                'temperature': 0,
+            },
+        )
+        content_blocks = (
+            response.get('output', {})
+            .get('message', {})
+            .get('content', [])
+        )
+        return '\n'.join(
+            block.get('text', '')
+            for block in content_blocks
+            if isinstance(block, dict) and block.get('text')
+        )
+
+    anthropic_model_id = (
+        model_id
+        if model_id.startswith(('anthropic.', 'us.anthropic.'))
+        else DEFAULT_NLP_ANTHROPIC_MODEL_ID
+    )
+    response = bedrock_client.invoke_model(
+        modelId=anthropic_model_id,
+        body=json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            # Thinking is on by default on Sonnet 5 and shares max_tokens.
+            "thinking": {"type": "disabled"},
+            "max_tokens": 4000,
+            "messages": [{
+                "role": "user",
+                "content": prompt
+            }]
+        })
+    )
+    response_body = json.loads(response['body'].read())
+    return response_body.get('content', [{}])[0].get('text', '[]')
+
+
 def enhanced_test_detection_with_ai(transcript_text: str) -> List[Dict[str, Any]]:
     """
-    Use Claude/Bedrock for enhanced test detection
-    Fallback when pattern matching isn't sufficient
+    Use Bedrock for enhanced test detection.
+    Fallback when pattern matching isn't sufficient.
     """
     try:
+        model_id = os.environ.get('CME_NLP_MODEL_ID', DEFAULT_NLP_MODEL_ID)
         prompt = f"""You are analyzing a transcript of a Compulsory Medical Examination (CME). 
 Extract EVERY instance where the examiner:
 1. Performs a medical test or examination
@@ -1586,36 +1669,10 @@ Be EXTREMELY THOROUGH - extract EVERY test, even if implicit. A 39-minute exam s
 Return ONLY a JSON array, no additional text or explanation:
 [{{"test_type": "range_of_motion", "declaration": "move your neck", "approximate_time": "early"}}, ...]"""
 
-        response = bedrock_client.invoke_model(
-            modelId="us.anthropic.claude-sonnet-5",
-            body=json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                # Thinking is on by default on Sonnet 5 and shares max_tokens.
-                "thinking": {"type": "disabled"},
-                "max_tokens": 4000,  # Increased for more tests
-                "messages": [{
-                    "role": "user",
-                    "content": prompt
-                }]
-            })
-        )
-        
-        response_body = json.loads(response['body'].read())
-        ai_result = response_body.get('content', [{}])[0].get('text', '[]')
-        
-        # Clean up AI response - might have markdown code blocks
-        ai_result = ai_result.strip()
-        if ai_result.startswith('```'):
-            # Remove markdown code blocks
-            lines = ai_result.split('\n')
-            ai_result = '\n'.join([l for l in lines if not l.startswith('```')])
-        if ai_result.startswith('json'):
-            ai_result = ai_result[4:].strip()
-        
-        # Parse AI response
-        tests = json.loads(ai_result)
-        logger.info(f"AI detected {len(tests)} tests")
-        return tests if isinstance(tests, list) else []
+        ai_result = _invoke_test_detection_model(prompt, model_id)
+        tests = _extract_json_array_from_model_text(ai_result)
+        logger.info(f"AI detected {len(tests)} tests using {model_id}")
+        return [test for test in tests if isinstance(test, dict)]
         
     except Exception as e:
         logger.error(f"Error in AI-enhanced test detection: {str(e)}")
@@ -1686,4 +1743,3 @@ def handler(event, context):
         import traceback
         logger.error(traceback.format_exc())
         raise e
-

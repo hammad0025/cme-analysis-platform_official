@@ -74,6 +74,82 @@ def test_failure_never_claims_test_was_skipped(processor):
         assert result["motion_present"] not in ("not_observed", "performed", "brief")
 
 
+def test_nova_video_analysis_uses_s3_video_block(processor, monkeypatch):
+    monkeypatch.setenv("CME_BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+    sent = {}
+
+    class _Bedrock:
+        def converse(self, **kwargs):
+            sent.update(kwargs)
+            return {
+                "output": {
+                    "message": {
+                        "content": [{
+                            "text": (
+                                '{"motion_present":"performed",'
+                                '"pose_match":"full_match",'
+                                '"confidence":0.86,'
+                                '"reasoning":"The patient visibly performs the requested movement.",'
+                                '"observed_evidence":["patient moves through the exam action"],'
+                                '"missing_evidence":[]}'
+                            )
+                        }]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(processor, "bedrock_client", _Bedrock())
+
+    result = processor.analyze_with_bedrock(
+        test_type="manual_muscle_testing",
+        test_timestamp=42.0,
+        transcript_excerpt="squeeze my fingers",
+        motion_labels=[],
+        person_count=2,
+        video_s3_key="cme-segments/case/clip.mp4",
+        s3_bucket="bucket",
+        video_is_segment=True,
+    )
+
+    assert result["motion_present"] == "performed"
+    assert result["pose_match"] == "full_match"
+    assert result["confidence"] == 0.86
+    assert result["provider"] == "bedrock"
+    assert result["model_id"] == "amazon.nova-lite-v1:0"
+    assert sent["modelId"] == "amazon.nova-lite-v1:0"
+    content = sent["messages"][0]["content"]
+    assert content[1]["video"]["format"] == "mp4"
+    assert (
+        content[1]["video"]["source"]["s3Location"]["uri"]
+        == "s3://bucket/cme-segments/case/clip.mp4"
+    )
+
+
+def test_nova_unsupported_video_format_is_unavailable(processor, monkeypatch):
+    monkeypatch.setenv("CME_BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
+
+    class _Bedrock:
+        def converse(self, **_kwargs):
+            raise AssertionError("unsupported formats should not call Bedrock")
+
+    monkeypatch.setattr(processor, "bedrock_client", _Bedrock())
+
+    result = processor.analyze_with_bedrock(
+        test_type="manual_muscle_testing",
+        test_timestamp=42.0,
+        transcript_excerpt="squeeze my fingers",
+        motion_labels=[],
+        person_count=2,
+        video_s3_key="uploads/input.avi",
+        s3_bucket="bucket",
+        video_is_segment=False,
+    )
+
+    assert result["motion_present"] == "analysis_unavailable"
+    assert result["confidence"] == 0.0
+    assert result["analysis_error"] == "unsupported_video_format_for_bedrock"
+
+
 def test_case_specific_heuristic_is_marked_deprecated(processor):
     doc = processor.use_fast_heuristic.__doc__ or ""
     assert "DEPRECATED" in doc

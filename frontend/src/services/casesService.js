@@ -10,6 +10,7 @@
 import api from './cmeApi';
 
 const STORAGE_KEY = 'cme_mock_cases_v1';
+const DIRECT_UPLOAD_TIMEOUT_MS = 115 * 60 * 1000;
 
 const USE_MOCK = (() => {
   const explicit = process.env.REACT_APP_USE_MOCK_API;
@@ -262,6 +263,7 @@ export function uploadFileWithProgress({ url, file, onProgress, mock, contentTyp
   const xhr = new XMLHttpRequest();
   const promise = new Promise((resolve, reject) => {
     xhr.open('PUT', url, true);
+    xhr.timeout = DIRECT_UPLOAD_TIMEOUT_MS;
     const effectiveType = contentType || inferContentType(file);
     if (effectiveType) {
       // Must match the content type the presigned URL was signed with,
@@ -278,13 +280,23 @@ export function uploadFileWithProgress({ url, file, onProgress, mock, contentTyp
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
+        if (onProgress) {
+          onProgress({
+            loaded: file.size,
+            total: file.size,
+            percent: 100,
+          });
+        }
         resolve({ ok: true, status: xhr.status });
       } else {
-        reject(new Error(`Upload failed (HTTP ${xhr.status})`));
+        const body = (xhr.responseText || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+        const details = body ? `: ${body}` : '';
+        reject(new Error(`Upload failed (HTTP ${xhr.status})${details}`));
       }
     };
-    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.onerror = () => reject(new Error('Network error during upload. Check the connection and try again.'));
     xhr.onabort = () => reject(new Error('Upload cancelled'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out before it completed. Check the connection and try again.'));
     xhr.send(file);
   });
   return { promise, cancel: () => xhr.abort() };
@@ -303,8 +315,8 @@ export async function startProcessing({ caseId, video, videos, reports }) {
     });
     return { ok: true, mock: true };
   }
-  await api.post('/cme/process', { session_id: caseId });
-  return { ok: true, mock: false };
+  const resp = await api.post('/cme/process', { session_id: caseId });
+  return { ok: true, mock: false, ...(resp.data || {}) };
 }
 
 /** Try to list sessions/cases from live API; gracefully fall back to mock. */
