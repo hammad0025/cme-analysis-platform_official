@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import types
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,26 @@ def test_bedrock_failure_returns_analysis_unavailable(processor):
     assert result["motion_present"] == "analysis_unavailable"
     assert result["confidence"] == 0.0
     assert result["analysis_error"] == "vision_model_unavailable"
+
+
+def test_dynamodb_compatible_converts_nested_floats_without_flattening(processor):
+    original = {
+        "sampling": {
+            "frames_per_second": 2.0,
+            "motion_bursts": [{"motion_score": 4.2}],
+        },
+        "frame_timestamps": [0.0, 0.125],
+        "is_synthetic": True,
+        "label": "range_of_motion",
+    }
+
+    result = processor._dynamodb_compatible(original)
+
+    assert result["sampling"]["frames_per_second"] == Decimal("2.0")
+    assert result["sampling"]["motion_bursts"][0]["motion_score"] == Decimal("4.2")
+    assert result["frame_timestamps"] == [Decimal("0.0"), Decimal("0.125")]
+    assert result["is_synthetic"] is True
+    assert result["label"] == "range_of_motion"
 
 
 def test_failure_never_claims_test_was_skipped(processor):

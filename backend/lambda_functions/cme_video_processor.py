@@ -48,6 +48,18 @@ BEDROCK_VIDEO_FORMATS = {
     'wmv': 'wmv',
 }
 
+
+def _dynamodb_compatible(value: Any) -> Any:
+    """Convert nested float values before writing structured evidence to DynamoDB."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {str(key): _dynamodb_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_dynamodb_compatible(item) for item in value]
+    return value
+
+
 # Import comprehensive knowledge base derived from Reference PDFs A-Y
 try:
     from cme_exam_knowledge_base import (
@@ -1354,7 +1366,7 @@ def process_video_for_cme_test(
         'created_at': int(time.time())
     }
     
-    actions_table.put_item(Item=action_item)
+    actions_table.put_item(Item=_dynamodb_compatible(action_item))
     logger.info(f"Persisted observed action: {action_id} - {motion_present}")
     
     return {
