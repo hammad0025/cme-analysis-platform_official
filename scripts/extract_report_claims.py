@@ -329,18 +329,17 @@ def extract_atomic_claims_heuristic(text: str, *, raw_text: str | None = None) -
 
 
 def _has_api_key() -> bool:
-    return bool(
-        os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-    )
+    from backend.lambda_functions.vision_client import has_provider_api_key
+
+    return has_provider_api_key()
 
 
 def extract_claims_llm(text: str, *, model: Optional[str] = None) -> Dict[str, str]:
     """Use VisionClient.text_analyze to extract exact quotes when API key present."""
+    from backend.lambda_functions.cme_analysis_utils import DEFAULT_AI_PROVIDER
     from backend.lambda_functions.vision_client import default_model_for, make_vision_client
 
-    provider = os.environ.get("CME_VISION_PROVIDER", "anthropic")
+    provider = os.environ.get("CME_VISION_PROVIDER", DEFAULT_AI_PROVIDER)
     client = make_vision_client(provider)
     model_id = model or default_model_for(provider)
 

@@ -47,7 +47,6 @@ from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .cme_analysis_utils import (
-    DEFAULT_SONNET_MODEL,
     add_analyze_result_cost,
 )
 from .prompts.production import (
@@ -56,7 +55,7 @@ from .prompts.production import (
     VERBAL_BEHAVIOR_PROMPT,
     VISUAL_BEHAVIOR_PROMPT,
 )
-from .vision_client import VisionClient, make_vision_client
+from .vision_client import VisionClient, default_model_for, make_vision_client, resolve_provider
 
 if TYPE_CHECKING:
     from .cme_transcription import Transcript
@@ -233,7 +232,7 @@ class BehaviorAnalysisResult:
 class CMEBehaviorAnalyzer:
     """Specialized analyzer for doctor behavior and professionalism."""
     
-    COST_PER_FRAME = 0.015
+    COST_PER_FRAME = 0.005
     COST_PER_TRANSCRIPT_SEGMENT = 0.01
     
     def __init__(
@@ -244,17 +243,16 @@ class CMEBehaviorAnalyzer:
     ):
         """Initialize the behavior analyzer.
 
-        Defaults to an Anthropic-backed VisionClient (preserving existing
-        runtime behavior). Pass `vision_client` to plug in OpenAI / Gemini.
+        Defaults to the configured provider (OpenAI unless CME_VISION_PROVIDER
+        overrides it). Pass `vision_client` to plug in a pre-built client.
         """
-        self.api_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
-        self.model = model or DEFAULT_SONNET_MODEL
+        provider = resolve_provider()
+        self.api_key = api_key
+        self.model = model or default_model_for(provider)
 
         if vision_client is None:
-            if not self.api_key:
-                raise ValueError("Anthropic API key required")
             self.vision_client: VisionClient = make_vision_client(
-                "anthropic", api_key=self.api_key, model_id=self.model
+                provider, api_key=self.api_key, model_id=self.model
             )
         else:
             self.vision_client = vision_client
@@ -921,13 +919,13 @@ def analyze_cme_behavior(
         transcript: Transcript text for verbal analysis
         plaintiff_name: Plaintiff name
         examiner_name: Examiner name
-        api_key: Anthropic API key
+        api_key: Provider API key
         frame_interval: Seconds between frames
         output_dir: Where to save results
         max_workers: Parallel vision API workers
         request_delay_sec: Delay before each frame API call
         resume: Use behavior_checkpoint.jsonl in output_dir
-        model: Anthropic model id
+        model: Provider model id
         
     Returns:
         BehaviorAnalysisResult

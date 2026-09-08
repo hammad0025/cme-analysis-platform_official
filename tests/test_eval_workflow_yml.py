@@ -153,12 +153,13 @@ def test_ci_workflow_is_unchanged_in_shape():
 # ----------------------------------------------------------------------
 
 
-def test_eval_workflow_uses_anthropic_api_key_secret():
+def test_eval_workflow_uses_openai_api_key_secret():
     body = EVAL_WORKFLOW.read_text(encoding="utf-8")
-    assert "ANTHROPIC_API_KEY" in body, "eval workflow must reference ANTHROPIC_API_KEY"
-    assert "secrets.ANTHROPIC_API_KEY" in body, (
-        "ANTHROPIC_API_KEY must be sourced from a GitHub Actions secret"
+    assert "OPENAI_API_KEY" in body, "eval workflow must reference OPENAI_API_KEY"
+    assert "secrets.OPENAI_API_KEY" in body, (
+        "OPENAI_API_KEY must be sourced from a GitHub Actions secret"
     )
+    assert "inputs.providers || 'openai'" in body
 
 
 def test_eval_workflow_invokes_eval_script_with_thresholds():

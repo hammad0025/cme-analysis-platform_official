@@ -36,7 +36,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import hashlib
 
-from .vision_client import VisionClient, make_vision_client
+from .vision_client import VisionClient, make_vision_client, resolve_provider
 
 
 class CranialNerve(Enum):
@@ -361,7 +361,7 @@ class CMEDorothyAnalyzer:
     Complete CME analyzer implementing all of Dorothy's requirements.
     """
     
-    COST_PER_FRAME = 0.015
+    COST_PER_FRAME = 0.005
     COST_PER_TRANSCRIPT_SEGMENT = 0.01
     
     ALL_CRANIAL_NERVES = [
@@ -377,12 +377,11 @@ class CMEDorothyAnalyzer:
     ]
     
     def __init__(self, api_key: str = None, vision_client: Optional[VisionClient] = None):
-        self.api_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
+        provider = resolve_provider()
+        self.api_key = api_key
         if vision_client is None:
-            if not self.api_key:
-                raise ValueError("Anthropic API key required")
             self.vision_client: VisionClient = make_vision_client(
-                "anthropic", api_key=self.api_key
+                provider, api_key=self.api_key
             )
         else:
             self.vision_client = vision_client
@@ -1012,7 +1011,7 @@ def analyze_cme_dorothy(
         report_claims: Dict of claims from doctor's report
         transcript: Full transcript text
         redlined_report_path: Path to redlined report for verification
-        api_key: Anthropic API key
+        api_key: Provider API key
         output_dir: Output directory (will create patient-named subfolder)
         frame_interval: Seconds between frames (default 3 for better coverage)
         

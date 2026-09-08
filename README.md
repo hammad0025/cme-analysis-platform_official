@@ -169,10 +169,10 @@ cdk deploy
 
 The canonical **local** runner is [`analyze_cme_full.py`](analyze_cme_full.py) at the repository root. It extracts frames once, runs technique and behavior vision passes, optionally ingests a transcript, and writes results under your output directory (including `cost_actual.json` for estimated vs actual spend).
 
-**Prerequisites:** `ffmpeg`, `ffprobe`, Python 3.12+, `ANTHROPIC_API_KEY`, and the Python deps that include `anthropic` (see `backend/lambda_functions/requirements.txt`).
+**Prerequisites:** `ffmpeg`, `ffprobe`, Python 3.12+, `OPENAI_API_KEY`, and the Python deps in `backend/requirements.txt`. Anthropic and Gemini remain available as explicit fallback providers when their keys are set.
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
 python analyze_cme_full.py path/to/exam.mp4 --plaintiff "Name" --examiner "Dr. Name" --preset standard
 ```
 
@@ -252,7 +252,6 @@ REACT_APP_USER_POOL_WEB_CLIENT_ID=your-client-id
 ---
 
 **Built for plaintiff attorneys by attorneys who understand the challenges of fighting biased CMEs.**
-
 
 
 

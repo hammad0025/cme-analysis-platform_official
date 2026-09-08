@@ -1,12 +1,11 @@
 """
 Provider-agnostic vision client abstraction for CME analysis.
 
-Step 1 of the multi-vendor roadmap. Defines an `AnalyzeResult` payload, a
-`VisionClient` ABC, and three concrete adapters (Anthropic, OpenAI, Gemini).
-Anthropic remains the default; the other adapters only activate when the
-caller passes `--providers openai|gemini` AND sets the matching env var.
-Missing keys for opted-in providers raise `VisionClientConfigError` rather
-than silently falling back.
+Defines an `AnalyzeResult` payload, a `VisionClient` ABC, and concrete
+adapters for OpenAI, Anthropic, and Gemini. New local runs are OpenAI-first;
+Anthropic and Gemini remain explicit provider choices. Missing keys for the
+selected provider raise `VisionClientConfigError` rather than silently falling
+back to another vendor.
 """
 
 from __future__ import annotations
@@ -19,6 +18,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Tuple, TypeVar
 
 from .cme_analysis_utils import (
+    DEFAULT_AI_PROVIDER,
+    DEFAULT_OPENAI_VERIFIER_MODEL,
+    DEFAULT_OPENAI_VISION_MODEL,
     DEFAULT_SONNET_MODEL,
     DEFAULT_VERIFIER_MODEL,
     OPUS_INPUT_PER_MTOK,
@@ -31,7 +33,7 @@ from .cme_analysis_utils import (
 T = TypeVar("T")
 
 
-SUPPORTED_PROVIDERS: Tuple[str, ...] = ("anthropic", "openai", "gemini")
+SUPPORTED_PROVIDERS: Tuple[str, ...] = ("openai", "anthropic", "gemini")
 
 
 class VisionClientConfigError(RuntimeError):
@@ -54,6 +56,12 @@ PROVIDER_PRICING: Dict[Tuple[str, str], Dict[str, float]] = {
         "input_per_mtok": SONNET_INPUT_PER_MTOK,
         "output_per_mtok": SONNET_OUTPUT_PER_MTOK,
     },
+    ("openai", "gpt-6-astra"): {"input_per_mtok": 10.0, "output_per_mtok": 50.0},
+    ("openai", "gpt-5.6-sol"): {"input_per_mtok": 4.0, "output_per_mtok": 20.0},
+    ("openai", "gpt-5.6"): {"input_per_mtok": 4.0, "output_per_mtok": 20.0},
+    ("openai", "gpt-5.6-terra"): {"input_per_mtok": 2.0, "output_per_mtok": 12.0},
+    ("openai", "gpt-5.6-luna"): {"input_per_mtok": 0.20, "output_per_mtok": 1.20},
+    # Older ids kept so cost reconciliation of past runs stays accurate.
     ("openai", "gpt-4o"): {"input_per_mtok": 2.5, "output_per_mtok": 10.0},
     ("openai", "gpt-4o-mini"): {"input_per_mtok": 0.15, "output_per_mtok": 0.60},
     ("gemini", "gemini-2.5-pro"): {"input_per_mtok": 1.25, "output_per_mtok": 10.0},
@@ -165,6 +173,49 @@ def openai_call_with_retry(
             delay = base_delay_sec * (2**attempt)
             time.sleep(min(delay, 120.0))
     raise last_exc  # pragma: no cover
+
+
+def _openai_output_text(response: Any) -> str:
+    """Return visible text from a Responses API object or dict."""
+    direct = getattr(response, "output_text", None)
+    if direct:
+        return str(direct)
+    if isinstance(response, dict) and response.get("output_text"):
+        return str(response["output_text"])
+
+    output = response.get("output", []) if isinstance(response, dict) else getattr(response, "output", [])
+    parts = []
+    for item in output or []:
+        content = item.get("content", []) if isinstance(item, dict) else getattr(item, "content", [])
+        for block in content or []:
+            if isinstance(block, dict):
+                if block.get("type") in {"output_text", "text"} and block.get("text"):
+                    parts.append(str(block["text"]))
+            else:
+                text = getattr(block, "text", None)
+                if text:
+                    parts.append(str(text))
+    return "".join(parts)
+
+
+def _openai_usage_tokens(response: Any) -> Tuple[int, int]:
+    usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    if usage is None:
+        return 0, 0
+
+    def _get(name: str) -> int:
+        if isinstance(usage, dict):
+            return int(usage.get(name, 0) or 0)
+        return int(getattr(usage, name, 0) or 0)
+
+    return _get("input_tokens"), _get("output_tokens")
+
+
+def _openai_request_id(response: Any) -> Optional[str]:
+    """Return an OpenAI request/response id from an SDK object or dict."""
+    if isinstance(response, dict):
+        return response.get("_request_id") or response.get("id")
+    return getattr(response, "_request_id", None) or getattr(response, "id", None)
 
 
 def gemini_call_with_retry(
@@ -345,24 +396,24 @@ class AnthropicVisionClient(VisionClient):
 
 
 class OpenAIVisionClient(VisionClient):
-    """Adapter around the openai SDK (>=1.0). Default model is gpt-4o."""
+    """Adapter around the OpenAI SDK Responses API."""
 
     provider = "openai"
-    default_model_id = "gpt-4o"
+    default_model_id = DEFAULT_OPENAI_VISION_MODEL
 
-    def __init__(self, api_key: str, model_id: str = "gpt-4o"):
+    def __init__(self, api_key: str, model_id: str = DEFAULT_OPENAI_VISION_MODEL):
         try:
             from openai import OpenAI
         except ImportError as e:
             raise VisionClientConfigError(
-                "openai package not installed. Run `pip install 'openai>=1.40'`."
+                "openai package not installed. Run `pip install 'openai>=2.0'`."
             ) from e
         if not api_key:
             raise VisionClientConfigError(
                 "OpenAI API key required (set OPENAI_API_KEY)."
             )
         self._client = OpenAI(api_key=api_key)
-        self._model_id = model_id or "gpt-4o"
+        self._model_id = model_id or DEFAULT_OPENAI_VISION_MODEL
 
     def analyze(
         self,
@@ -376,17 +427,23 @@ class OpenAIVisionClient(VisionClient):
         used_model = model_id or self._model_id
         b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
         data_uri = f"data:{mime_type};base64,{b64}"
+        image_detail = os.environ.get("CME_OPENAI_IMAGE_DETAIL", "high").strip() or "high"
 
         def _call():
-            return self._client.chat.completions.create(
+            return self._client.responses.create(
                 model=used_model,
-                max_tokens=max_tokens,
-                messages=[
+                max_output_tokens=max_tokens,
+                store=False,
+                input=[
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": data_uri}},
+                            {"type": "input_text", "text": prompt},
+                            {
+                                "type": "input_image",
+                                "image_url": data_uri,
+                                "detail": image_detail,
+                            },
                         ],
                     }
                 ],
@@ -396,17 +453,9 @@ class OpenAIVisionClient(VisionClient):
         response = openai_call_with_retry(_call)
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
-        try:
-            text = response.choices[0].message.content or ""
-        except Exception:
-            text = ""
-
-        usage = getattr(response, "usage", None)
-        inp = int(getattr(usage, "prompt_tokens", 0) or 0) if usage is not None else 0
-        out = (
-            int(getattr(usage, "completion_tokens", 0) or 0) if usage is not None else 0
-        )
-        request_id = getattr(response, "id", None)
+        text = _openai_output_text(response)
+        inp, out = _openai_usage_tokens(response)
+        request_id = _openai_request_id(response)
         cost = (
             _estimate_cost_usd(self.provider, used_model, inp, out)
             if (inp or out)
@@ -436,14 +485,15 @@ class OpenAIVisionClient(VisionClient):
         used_model = model_id or self._model_id
 
         def _call():
-            return self._client.chat.completions.create(
+            return self._client.responses.create(
                 model=used_model,
-                max_tokens=max_tokens,
-                messages=[
+                max_output_tokens=max_tokens,
+                store=False,
+                input=[
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
+                            {"type": "input_text", "text": prompt},
                         ],
                     }
                 ],
@@ -453,17 +503,9 @@ class OpenAIVisionClient(VisionClient):
         response = openai_call_with_retry(_call)
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
-        try:
-            text = response.choices[0].message.content or ""
-        except Exception:
-            text = ""
-
-        usage = getattr(response, "usage", None)
-        inp = int(getattr(usage, "prompt_tokens", 0) or 0) if usage is not None else 0
-        out = (
-            int(getattr(usage, "completion_tokens", 0) or 0) if usage is not None else 0
-        )
-        request_id = getattr(response, "id", None)
+        text = _openai_output_text(response)
+        inp, out = _openai_usage_tokens(response)
+        request_id = _openai_request_id(response)
         cost = (
             _estimate_cost_usd(self.provider, used_model, inp, out)
             if (inp or out)
@@ -640,14 +682,34 @@ _PROVIDER_ENV: Dict[str, Tuple[str, ...]] = {
 }
 
 
+def resolve_provider(provider: Optional[str] = None) -> str:
+    p = (provider or os.environ.get("CME_VISION_PROVIDER") or DEFAULT_AI_PROVIDER).strip().lower()
+    if p not in SUPPORTED_PROVIDERS:
+        raise VisionClientConfigError(
+            f"Unsupported provider {p!r}. Supported: {SUPPORTED_PROVIDERS}."
+        )
+    return p
+
+
+def provider_env_vars(provider: str) -> Tuple[str, ...]:
+    """Return the environment variable names accepted for a provider key."""
+    p = resolve_provider(provider)
+    return _PROVIDER_ENV[p]
+
+
+def has_provider_api_key(provider: Optional[str] = None) -> bool:
+    """True when the selected provider's API key is available in the environment."""
+    return any(os.environ.get(var, "").strip() for var in provider_env_vars(resolve_provider(provider)))
+
+
 def _resolve_api_key(provider: str, explicit: Optional[str]) -> str:
     if explicit:
         return explicit
-    for var in _PROVIDER_ENV.get(provider, ()):
+    for var in provider_env_vars(provider):
         v = os.environ.get(var)
         if v:
             return v
-    env_list = " or ".join(_PROVIDER_ENV.get(provider, ()))
+    env_list = " or ".join(provider_env_vars(provider))
     raise VisionClientConfigError(
         f"Missing API key for provider {provider!r}. Set {env_list}."
     )
@@ -657,23 +719,24 @@ def default_verifier_model_for(provider: str) -> str:
     """Default model for the claim-verdict stage.
 
     Separate from `default_model_for` (per-frame vision): verdicts run tens of
-    times per case rather than thousands, so the stronger Opus-tier model is
-    worth its higher per-call cost there.
+    times per case rather than thousands, so they use a stronger reasoning tier
+    than the high-volume frame pass.
     """
     p = (provider or "").strip().lower()
+    if p == "openai":
+        return DEFAULT_OPENAI_VERIFIER_MODEL
     if p == "anthropic":
         return DEFAULT_VERIFIER_MODEL
-    # Non-Anthropic providers have no separate verifier tier configured.
     return default_model_for(provider)
 
 
 def default_model_for(provider: str) -> str:
     """Return the default model id used when none is specified for a provider."""
     p = (provider or "").strip().lower()
+    if p == "openai":
+        return DEFAULT_OPENAI_VISION_MODEL
     if p == "anthropic":
         return DEFAULT_SONNET_MODEL
-    if p == "openai":
-        return "gpt-4o"
     if p == "gemini":
         return "gemini-2.5-pro"
     raise VisionClientConfigError(f"Unsupported provider {provider!r}")
@@ -701,7 +764,9 @@ def make_vision_client(
             api_key=key, model_id=model_id or DEFAULT_SONNET_MODEL
         )
     if p == "openai":
-        return OpenAIVisionClient(api_key=key, model_id=model_id or "gpt-4o")
+        return OpenAIVisionClient(
+            api_key=key, model_id=model_id or DEFAULT_OPENAI_VISION_MODEL
+        )
     if p == "gemini":
         return GeminiVisionClient(
             api_key=key, model_id=model_id or "gemini-2.5-pro"

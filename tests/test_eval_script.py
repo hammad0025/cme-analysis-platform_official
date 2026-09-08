@@ -289,13 +289,14 @@ def test_compare_to_missing_baseline_exits_non_zero(tmp_path: Path):
 # ----------------------------------------------------------------------
 
 
-def test_no_real_anthropic_client_built_during_module_import(eval_mod, monkeypatch):
+def test_no_real_provider_client_built_during_module_import(eval_mod, monkeypatch):
     """Loading the script must not instantiate any real provider client.
     The analyzers only build a client when constructed. This test exists
     to make that invariant explicit in the test suite."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    # Reaching this assertion implies the module imported without an
-    # ANTHROPIC_API_KEY in the environment, which would have raised inside
-    # any eager AnthropicVisionClient construction.
+    # Reaching this assertion implies the module imported without provider
+    # keys in the environment, which would have raised inside any eager
+    # VisionClient construction.
     assert hasattr(eval_mod, "evaluate_manifest")
     assert callable(eval_mod.evaluate_manifest)

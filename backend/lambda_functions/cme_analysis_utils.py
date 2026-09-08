@@ -15,15 +15,17 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 T = TypeVar("T")
 
-# Frame-by-frame vision runs thousands of calls per case, so the per-frame model
-# dominates cost. Sonnet 5 is the first Sonnet-tier model with high-resolution
-# vision (2576px vs 1568px long edge), which is what lets it resolve small
-# instruments — a goniometer in the examiner's hand — in a wide room shot.
+# New runs are OpenAI-first. Frame-by-frame vision runs thousands of calls per
+# case, so the per-frame model dominates cost; use the cost-sensitive tier for
+# frames, then escalate only the low-volume legal judgment step.
+DEFAULT_AI_PROVIDER = "openai"
+DEFAULT_OPENAI_VISION_MODEL = "gpt-5.6-luna"
+DEFAULT_OPENAI_VERIFIER_MODEL = "gpt-6-astra"
+
+# Anthropic ids are kept for explicit fallback runs and historical cost
+# reconciliation.
 DEFAULT_SONNET_MODEL = "claude-sonnet-5"
 
-# Claim verdicts run tens of times per case, not thousands, and decide whether a
-# doctor's written claim is contradicted by the video. Quality matters far more
-# than per-call cost here, so this stage gets the stronger model.
 DEFAULT_VERIFIER_MODEL = "claude-opus-5"
 
 # Case metadata keys that must never enter deposition crosswalk / claim verifier.
@@ -94,7 +96,7 @@ SONNET_OUTPUT_PER_MTOK = 15.0
 # Opus-tier pricing, used by the claim verifier stage.
 OPUS_INPUT_PER_MTOK = 5.0
 OPUS_OUTPUT_PER_MTOK = 25.0
-DEFAULT_HEURISTIC_COST_PER_VISION_CALL = 0.015
+DEFAULT_HEURISTIC_COST_PER_VISION_CALL = 0.005
 
 
 def probe_video_duration_sec(video_path: str) -> float:
@@ -163,7 +165,7 @@ def estimate_full_analysis_cost_usd(
     }
 
 
-DEFAULT_HEURISTIC_COST_PER_CLAIM_VERDICT = 0.025
+DEFAULT_HEURISTIC_COST_PER_CLAIM_VERDICT = 0.15
 DEFAULT_HEURISTIC_COST_PER_RESEARCH_CALL = 0.01
 
 

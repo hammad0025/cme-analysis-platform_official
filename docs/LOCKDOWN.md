@@ -17,7 +17,7 @@ Prints `SET` / `MISSING` only — never secret values. Exits `1` if critical key
 | Key | Required for | Notes |
 |-----|--------------|-------|
 | `CME_ALLOW_LOCAL_ANALYSIS=1` | Local analyze + verifier | Cost gate; must be exactly `1` |
-| `ANTHROPIC_API_KEY` | Local analyze + verifier LLM | Default vision + text provider |
+| `OPENAI_API_KEY` | Local analyze + verifier LLM | Default vision + text provider |
 | `REACT_APP_API_URL` | Frontend live mode | Required when `REACT_APP_USE_MOCK_API=false` |
 
 Copy `.env.example` → `.env` (gitignored). Never commit `.env`.
@@ -27,7 +27,7 @@ Copy `.env.example` → `.env` (gitignored). Never commit `.env`.
 | Key | When used |
 |-----|-----------|
 | `PERPLEXITY_API_KEY` | Only with `--with-research` on analyze or verifier scripts |
-| `OPENAI_API_KEY` | Only with `analyze_cme_full.py --providers openai,...` |
+| `ANTHROPIC_API_KEY` | Only with `analyze_cme_full.py --providers anthropic,...` or `CME_VISION_PROVIDER=anthropic` |
 | `GOOGLE_API_KEY` | Only with `analyze_cme_full.py --providers gemini,...` |
 
 **Perplexity is never auto-enabled** when a key is present. You must pass `--with-research`.
@@ -36,9 +36,10 @@ Copy `.env.example` → `.env` (gitignored). Never commit `.env`.
 
 | Provider | Local scripts | Production |
 |----------|---------------|------------|
-| **Anthropic** | Default; required for paid local runs | Via API key in Lambda env |
+| **OpenAI** | Default; required for paid local runs | Via API key in Lambda env |
+| **Anthropic** | Optional fallback; set `--providers anthropic` or `CME_VISION_PROVIDER=anthropic` | Configured per deploy |
 | **Perplexity** | Opt-in `--with-research` only | Same opt-in pattern |
-| **OpenAI / Gemini** | Only via `--providers` flag | Configured per deploy |
+| **Gemini** | Only via `--providers gemini` | Configured per deploy |
 | **AWS Bedrock** | Not used locally | IAM role on Lambda; no local key |
 
 ## Cost gates
@@ -59,10 +60,10 @@ python scripts/estimate_cme_cost.py path/to/video.mp4
 ### `run_claim_verifier.py`
 
 - Refuses unless `CME_ALLOW_LOCAL_ANALYSIS=1` (or `--force`)
-- Prints cost estimate before LLM batch (~$0.025/claim heuristic)
+- Prints cost estimate before LLM batch (~$0.15/claim heuristic)
 - `--dry-run` loads inputs and prints counts + estimate, no API calls
 - `--offline` uses keyword heuristics (no LLM, free)
-- Osborne sample (~11 claims): ~**$0.28** LLM; +~**$0.11** with `--with-research`
+- Osborne sample (~11 claims): ~**$1.65** LLM; +~**$0.11** with `--with-research`
 
 ## Safe demo (no API spend)
 

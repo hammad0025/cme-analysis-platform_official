@@ -6,10 +6,11 @@ Loads frame analyses, behavior observations, and claims.json — then calls
 run_claim_verifier_with_merged_observations (same path as analyze_cme_full.py
 phase 3.5). Does NOT re-run vision frame analysis.
 
-Requires CME_ALLOW_LOCAL_ANALYSIS=1 (unless --force). LLM verdicts need
-ANTHROPIC_API_KEY (~$0.025/claim heuristic; 11 claims ≈ $0.28). Perplexity
-research is opt-in via --with-research (~+$0.01/claim). Max typical spend for
-Osborne sample: ~$0.50 LLM + ~$0.15 research. Use --dry-run to preview counts.
+Requires CME_ALLOW_LOCAL_ANALYSIS=1 (unless --force). LLM verdicts default to
+OpenAI via OPENAI_API_KEY (~$0.15/claim heuristic; 11 claims ≈ $1.65).
+Perplexity research is opt-in via --with-research (~+$0.01/claim). Max typical
+spend for Osborne sample: ~$2.00 LLM + ~$0.15 research. Use --dry-run to
+preview counts.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.lambda_functions.cme_analysis_utils import filter_medical_claims
+from backend.lambda_functions.cme_analysis_utils import DEFAULT_AI_PROVIDER, filter_medical_claims
 
 
 def _format_timestamp(sec: float) -> str:
@@ -186,7 +187,7 @@ def _check_local_gate(*, force: bool) -> None:
         print("REFUSED: Local claim verifier is disabled by default.", file=sys.stderr)
         print("=" * 60, file=sys.stderr)
         print(
-            f"Set {ALLOW_LOCAL_ENV}=1 to enable (~$0.025/claim LLM; use --dry-run first).",
+            f"Set {ALLOW_LOCAL_ENV}=1 to enable (~$0.15/claim LLM; use --dry-run first).",
             file=sys.stderr,
         )
         print("Or pass --force to bypass (not recommended).", file=sys.stderr)
@@ -194,11 +195,9 @@ def _check_local_gate(*, force: bool) -> None:
 
 
 def _has_api_key() -> bool:
-    return bool(
-        os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-    )
+    from backend.lambda_functions.vision_client import has_provider_api_key
+
+    return has_provider_api_key()
 
 
 def run_offline_heuristic_verifier(
@@ -497,7 +496,8 @@ def main() -> None:
         if not args.offline:
             print(
                 "No vision API key — using offline keyword heuristic (--offline). "
-                "Set ANTHROPIC_API_KEY for LLM verdicts.",
+                "Set OPENAI_API_KEY for default LLM verdicts, or set "
+                "CME_VISION_PROVIDER=anthropic with ANTHROPIC_API_KEY.",
                 file=sys.stderr,
             )
         verdicts = run_offline_heuristic_verifier(
@@ -541,11 +541,11 @@ def main() -> None:
             else:
                 print("Perplexity research: enabled (opt-in).")
 
-        provider = os.environ.get("CME_VISION_PROVIDER", "anthropic")
+        provider = os.environ.get("CME_VISION_PROVIDER", DEFAULT_AI_PROVIDER)
         client = make_vision_client(provider)
         # Verdicts are the legal judgement step and run tens of times per case,
-        # so they default to the stronger Opus-tier model rather than the
-        # per-frame vision default. --model still overrides.
+        # so they default to a stronger reasoning tier than the per-frame
+        # vision default. --model still overrides.
         model_id = args.model or default_verifier_model_for(provider)
 
         print(f"Running claim verifier ({provider} / {model_id})…")

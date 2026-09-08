@@ -45,7 +45,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
 from .cme_analysis_utils import (
-    DEFAULT_SONNET_MODEL,
     add_analyze_result_cost,
     total_video_duration_sec,
 )
@@ -55,7 +54,7 @@ from .prompts.production import (
     FRAME_ANALYSIS_PROMPT,
     TECHNIQUE_FRAME_PROMPT_VERSION,
 )
-from .vision_client import VisionClient, make_vision_client
+from .vision_client import VisionClient, default_model_for, make_vision_client, resolve_provider
 
 if TYPE_CHECKING:
     from .cme_transcription import Transcript
@@ -249,7 +248,7 @@ class CMEComprehensiveAnalyzer:
     Comprehensive CME analyzer - video, audio, behavior, everything.
     """
     
-    COST_PER_FRAME = 0.015  # Sonnet
+    COST_PER_FRAME = 0.005  # OpenAI default frame pass
     COST_PER_AUDIO_SEGMENT = 0.01
     
     def __init__(
@@ -260,20 +259,18 @@ class CMEComprehensiveAnalyzer:
     ):
         """Initialize analyzer.
 
-        When `vision_client` is not provided, builds the default
-        Anthropic-backed client (matching prior behavior). When provided,
-        the caller controls the vendor. All model calls (frame + transcript)
-        now route through `self.vision_client`, so the raw anthropic SDK
-        is no longer instantiated here.
+        When `vision_client` is not provided, builds the configured default
+        provider client (OpenAI unless CME_VISION_PROVIDER overrides it). When
+        provided, the caller controls the vendor. All model calls route through
+        `self.vision_client`, so no raw vendor SDK is instantiated here.
         """
-        self.api_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
-        self.model = model or DEFAULT_SONNET_MODEL
+        provider = resolve_provider()
+        self.api_key = api_key
+        self.model = model or default_model_for(provider)
 
         if vision_client is None:
-            if not self.api_key:
-                raise ValueError("Anthropic API key required")
             self.vision_client: VisionClient = make_vision_client(
-                "anthropic", api_key=self.api_key, model_id=self.model
+                provider, api_key=self.api_key, model_id=self.model
             )
         else:
             self.vision_client = vision_client
@@ -1155,7 +1152,7 @@ def analyze_cme_comprehensive(
         plaintiff_name: Plaintiff name
         examiner_name: Examiner name  
         exam_date: Exam date
-        api_key: Anthropic API key
+        api_key: Provider API key
         output_dir: Output directory
         frame_interval: Seconds between frames
         frames_dir: Pre-extracted JPEG directory (skips ffmpeg in this module)
@@ -1163,7 +1160,7 @@ def analyze_cme_comprehensive(
         max_workers: Parallel workers for vision API
         request_delay_sec: Delay per frame request (429 mitigation)
         resume: Continue from comprehensive_checkpoint.jsonl in output_dir
-        model: Anthropic model id
+        model: Provider model id
         
     Returns:
         CMEComprehensiveResult with all findings

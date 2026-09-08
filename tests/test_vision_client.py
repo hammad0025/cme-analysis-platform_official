@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -16,15 +17,25 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from backend.lambda_functions.cme_analysis_utils import DEFAULT_SONNET_MODEL
+from backend.lambda_functions.cme_analysis_utils import (
+    DEFAULT_AI_PROVIDER,
+    DEFAULT_OPENAI_VERIFIER_MODEL,
+    DEFAULT_OPENAI_VISION_MODEL,
+    DEFAULT_SONNET_MODEL,
+)
 from backend.lambda_functions.vision_client import (
     AnalyzeResult,
     AnthropicVisionClient,
+    OpenAIVisionClient,
     PROVIDER_PRICING,
     VisionClient,
     VisionClientConfigError,
+    default_model_for,
+    default_verifier_model_for,
     _estimate_cost_usd,
+    has_provider_api_key,
     make_vision_client,
+    resolve_provider,
 )
 
 
@@ -44,15 +55,130 @@ def test_make_vision_client_openai_missing_key_raises(monkeypatch):
         make_vision_client("openai", api_key=None)
 
 
+def test_openai_is_the_default_provider(monkeypatch):
+    monkeypatch.delenv("CME_VISION_PROVIDER", raising=False)
+    assert DEFAULT_AI_PROVIDER == "openai"
+    assert resolve_provider() == "openai"
+    assert default_model_for("openai") == DEFAULT_OPENAI_VISION_MODEL
+    assert default_verifier_model_for("openai") == DEFAULT_OPENAI_VERIFIER_MODEL
+
+
+def test_has_provider_api_key_checks_selected_provider(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.delenv("CME_VISION_PROVIDER", raising=False)
+    assert not has_provider_api_key()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert has_provider_api_key()
+
+    monkeypatch.setenv("CME_VISION_PROVIDER", "anthropic")
+    assert has_provider_api_key()
+
+
 def test_provider_pricing_table_yields_positive_cost():
     """PROVIDER_PRICING lookups produce a positive cost estimate for known models."""
     inp, out = 1000, 500
     cost = _estimate_cost_usd("anthropic", DEFAULT_SONNET_MODEL, inp, out)
     assert cost is not None and cost > 0
 
-    # Sanity-check at least one non-Anthropic entry too so step 2 has working priors.
-    assert ("openai", "gpt-4o") in PROVIDER_PRICING
+    # Sanity-check the OpenAI-first model tiers used for new runs.
+    assert ("openai", DEFAULT_OPENAI_VISION_MODEL) in PROVIDER_PRICING
+    assert ("openai", DEFAULT_OPENAI_VERIFIER_MODEL) in PROVIDER_PRICING
     assert ("gemini", "gemini-2.5-pro") in PROVIDER_PRICING
+
+
+def _fake_openai_sdk(monkeypatch, response):
+    calls = []
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return response
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.responses = FakeResponses()
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+    return calls
+
+
+def test_openai_vision_client_uses_responses_api_for_images(monkeypatch):
+    import backend.lambda_functions.vision_client as vc
+
+    response = {
+        "id": "resp_image_123",
+        "output_text": '{"frame":"ok"}',
+        "usage": {"input_tokens": 2000, "output_tokens": 300},
+    }
+    calls = _fake_openai_sdk(monkeypatch, response)
+    monkeypatch.setenv("CME_OPENAI_IMAGE_DETAIL", "low")
+
+    seen = {"called": False}
+
+    def spy_retry(fn, **kwargs):
+        seen["called"] = True
+        return fn()
+
+    monkeypatch.setattr(vc, "openai_call_with_retry", spy_retry)
+
+    client = OpenAIVisionClient(api_key="sk-test")
+    result = client.analyze(b"\x00\x01\x02", "prompt-text", max_tokens=900, mime_type="image/png")
+
+    assert result.text == '{"frame":"ok"}'
+    assert result.provider == "openai"
+    assert result.model_id == DEFAULT_OPENAI_VISION_MODEL
+    assert result.input_tokens == 2000
+    assert result.output_tokens == 300
+    assert result.request_id == "resp_image_123"
+    assert result.usd_cost_estimate is not None and result.usd_cost_estimate > 0
+    assert seen["called"], "openai_call_with_retry must wrap image analysis"
+
+    sent = calls[-1]
+    assert sent["model"] == DEFAULT_OPENAI_VISION_MODEL
+    assert sent["max_output_tokens"] == 900
+    assert sent["store"] is False
+    content = sent["input"][0]["content"]
+    assert content[0] == {"type": "input_text", "text": "prompt-text"}
+    assert content[1]["type"] == "input_image"
+    assert content[1]["image_url"].startswith("data:image/png;base64,")
+    assert content[1]["detail"] == "low"
+
+
+def test_openai_vision_client_text_analyze_uses_verifier_model(monkeypatch):
+    response = {
+        "id": "resp_text_456",
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": '{"verdict":"supported"}'}],
+            }
+        ],
+        "usage": {"input_tokens": 123, "output_tokens": 45},
+    }
+    calls = _fake_openai_sdk(monkeypatch, response)
+
+    client = OpenAIVisionClient(api_key="sk-test")
+    result = client.text_analyze(
+        "prompt only",
+        model_id=DEFAULT_OPENAI_VERIFIER_MODEL,
+        max_tokens=800,
+    )
+
+    assert result.text == '{"verdict":"supported"}'
+    assert result.model_id == DEFAULT_OPENAI_VERIFIER_MODEL
+    assert result.provider == "openai"
+    assert result.input_tokens == 123
+    assert result.output_tokens == 45
+
+    sent = calls[-1]
+    assert sent["model"] == DEFAULT_OPENAI_VERIFIER_MODEL
+    assert sent["max_output_tokens"] == 800
+    assert sent["store"] is False
+    content = sent["input"][0]["content"]
+    assert content == [{"type": "input_text", "text": "prompt only"}]
 
 
 def test_anthropic_vision_client_happy_path(monkeypatch):

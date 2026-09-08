@@ -9,7 +9,7 @@ on:
     inputs:
       providers:
         description: Comma-separated providers (anthropic, openai, gemini)
-        default: anthropic
+        default: openai
         required: false
       threshold-pass-rate:
         description: Absolute pass-rate floor (0.0 - 1.0)
@@ -57,7 +57,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install jsonschema anthropic
+          pip install jsonschema anthropic openai
 
       - name: Run eval on PR head
         env:
@@ -69,7 +69,7 @@ jobs:
           set -euo pipefail
           mkdir -p eval_runs
           python scripts/eval_cme_vision.py \
-            --providers "${{ inputs.providers || 'anthropic' }}" \
+            --providers "${{ inputs.providers || 'openai' }}" \
             --threshold-pass-rate "${{ inputs.threshold-pass-rate || '0.70' }}" \
             --output-dir eval_runs/head \
             --json-out eval_summary.json \
@@ -97,7 +97,7 @@ jobs:
           (
             cd ../baseline
             python scripts/eval_cme_vision.py \
-              --providers "${{ inputs.providers || 'anthropic' }}" \
+              --providers "${{ inputs.providers || 'openai' }}" \
               --threshold-pass-rate "${{ inputs.threshold-pass-rate || '0.70' }}" \
               --output-dir eval_runs/baseline \
               --json-out "$GITHUB_WORKSPACE/baseline_summary.json" \
@@ -107,7 +107,7 @@ jobs:
           if [ -f baseline_summary.json ]; then
             echo "Re-running PR head with --compare-to baseline"
             python scripts/eval_cme_vision.py \
-              --providers "${{ inputs.providers || 'anthropic' }}" \
+              --providers "${{ inputs.providers || 'openai' }}" \
               --threshold-pass-rate "${{ inputs.threshold-pass-rate || '0.70' }}" \
               --threshold-regression "0.05" \
               --output-dir eval_runs/head_with_delta \

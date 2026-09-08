@@ -16,7 +16,7 @@ CLI summary (run `--help` for the canonical list):
     --manifest                Path to the golden-set manifest JSON.
     --providers               Comma-separated vendor list. The first entry
                               is the "primary" provider (the one that drives
-                              pass/fail). Default: anthropic.
+                              pass/fail). Default: openai.
     --output-dir              Directory to land per-frame outputs in.
                               Default: eval_runs/<timestamp>/.
     --max-workers             ThreadPool size for vision calls.
@@ -62,8 +62,8 @@ Aggregation and exit codes:
     rollup, top failures, and (when --compare-to is set) the delta block
     are all in `eval_summary.json` and `eval_summary.md`.
 
-Defaults are tuned for local, Anthropic-only runs:
-    ANTHROPIC_API_KEY=... python scripts/eval_cme_vision.py
+Defaults are tuned for local, OpenAI-only runs:
+    OPENAI_API_KEY=... python scripts/eval_cme_vision.py
 
 is the recommended invocation; no other flags are required.
 """
@@ -90,7 +90,7 @@ if str(REPO_ROOT) not in sys.path:
 # Imports from the backend package. These are import-time light (no API key
 # required) because the analyzers only construct a real client when
 # instantiated. Tests rely on this property.
-from backend.lambda_functions.cme_analysis_utils import DEFAULT_SONNET_MODEL  # noqa: E402
+from backend.lambda_functions.cme_analysis_utils import DEFAULT_AI_PROVIDER  # noqa: E402
 from backend.lambda_functions.cme_behavior_analyzer import (  # noqa: E402
     CMEBehaviorAnalyzer,
     VisualBehaviorObservation,
@@ -935,9 +935,9 @@ def _resolve_passes(arg: str) -> List[str]:
 
 
 def _resolve_providers(arg: str) -> List[str]:
-    out = [p.strip().lower() for p in (arg or "anthropic").split(",") if p.strip()]
+    out = [p.strip().lower() for p in (arg or DEFAULT_AI_PROVIDER).split(",") if p.strip()]
     if not out:
-        out = ["anthropic"]
+        out = [DEFAULT_AI_PROVIDER]
     return out
 
 
@@ -965,11 +965,8 @@ def evaluate_manifest(
     manifest = validate_manifest(manifest_path, schema_path=schema_path)
     plans = build_plan(manifest, manifest_path)
 
-    primary_provider = providers[0] if providers else "anthropic"
-    try:
-        primary_model = default_model_for(primary_provider)
-    except VisionClientConfigError:
-        primary_model = DEFAULT_SONNET_MODEL
+    primary_provider = providers[0] if providers else DEFAULT_AI_PROVIDER
+    primary_model = default_model_for(primary_provider)
 
     if dry_run:
         # Print the plan to stdout and exit; no API calls.
@@ -1110,7 +1107,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         description="Real eval harness for the CME vision analyzers.",
     )
     p.add_argument("--manifest", type=Path, default=MANIFEST_DEFAULT)
-    p.add_argument("--providers", default="anthropic")
+    p.add_argument("--providers", default=DEFAULT_AI_PROVIDER)
     p.add_argument(
         "--output-dir",
         type=Path,

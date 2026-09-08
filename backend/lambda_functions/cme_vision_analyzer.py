@@ -2,9 +2,9 @@
 CME VISION ANALYZER - Production Video Analysis with AI Vision
 ==============================================================
 
-Uses Claude Vision API for comprehensive frame-by-frame CME video analysis.
+Uses the configured AI vision provider for comprehensive frame-by-frame CME video analysis.
 
-Cost: ~$1.50 per CME case (100 frames @ $0.015/frame with Sonnet)
+Cost depends on provider/model and frame count.
 
 Features:
 - Automatic frame extraction from any video format
@@ -25,11 +25,11 @@ from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
-from .vision_client import VisionClient, make_vision_client
+from .vision_client import VisionClient, default_model_for, make_vision_client, resolve_provider
 
 
 class AnalysisModel(Enum):
-    """Available vision models."""
+    """Legacy Anthropic model shortcuts."""
     HAIKU = "claude-3-haiku-20240307"      # Fast, cheap (~$0.005/frame)
     SONNET = "claude-3-sonnet-20240229"    # Balanced (~$0.015/frame)
     OPUS = "claude-3-opus-20240229"        # Best quality (~$0.075/frame)
@@ -139,31 +139,39 @@ class CMEVisionAnalyzer:
     def __init__(
         self,
         api_key: str = None,
-        model: AnalysisModel = AnalysisModel.SONNET,
+        model: Optional[AnalysisModel | str] = None,
         vision_client: Optional[VisionClient] = None,
     ):
         """
         Initialize the analyzer.
 
         Args:
-            api_key: Anthropic API key (or set ANTHROPIC_API_KEY env var)
-            model: Which Claude model to use for vision analysis
+            api_key: Provider API key (or set the provider env var)
+            model: Optional legacy Claude model shortcut
             vision_client: Optional pre-built VisionClient (alt provider)
         """
-        self.api_key = api_key or os.environ.get('ANTHROPIC_API_KEY')
-        self.model = model
+        provider = resolve_provider()
+        if provider != "anthropic" and isinstance(model, AnalysisModel):
+            raise ValueError(
+                "Legacy Claude model shortcuts require CME_VISION_PROVIDER=anthropic. "
+                "Omit --model for the OpenAI default or pass an OpenAI model id."
+            )
+        self.api_key = api_key
+        self.model = model or default_model_for(provider)
+        model_id = self.model.value if isinstance(self.model, AnalysisModel) else str(self.model)
+        self.cost_per_image = (
+            self.COST_PER_IMAGE[self.model]
+            if isinstance(self.model, AnalysisModel)
+            else 0.005
+        )
         if vision_client is None:
-            if not self.api_key:
-                raise ValueError(
-                    "Anthropic API key required. Set ANTHROPIC_API_KEY or pass api_key parameter."
-                )
             self.vision_client: VisionClient = make_vision_client(
-                "anthropic", api_key=self.api_key, model_id=model.value
+                provider, api_key=self.api_key, model_id=model_id
             )
         else:
             self.vision_client = vision_client
         self.result = CMEVideoAnalysisResult()
-        self.result.model_used = model.value
+        self.result.model_used = model_id
         
     def extract_frames(self, video_paths: List[str], output_dir: str = None,
                       frame_interval_sec: float = 5.0) -> List[Path]:
@@ -276,7 +284,7 @@ class CMEVisionAnalyzer:
             )
             
             # Track cost
-            self.result.total_cost_usd += self.COST_PER_IMAGE[self.model]
+            self.result.total_cost_usd += self.cost_per_image
             
             return analysis
             
@@ -306,8 +314,9 @@ class CMEVisionAnalyzer:
         analyses = []
         total = len(frame_paths)
         
-        print(f"\nAnalyzing {total} frames with {self.model.value}...")
-        print(f"Estimated cost: ${total * self.COST_PER_IMAGE[self.model]:.2f}")
+        model_label = self.model.value if isinstance(self.model, AnalysisModel) else str(self.model)
+        print(f"\nAnalyzing {total} frames with {model_label}...")
+        print(f"Estimated cost: ${total * self.cost_per_image:.2f}")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
@@ -572,7 +581,7 @@ def analyze_cme_case(
     examiner_name: str = None,
     exam_date: str = None,
     api_key: str = None,
-    model: str = "sonnet",
+    model: str = None,
     frame_interval: float = 5.0,
     output_dir: str = None
 ) -> CMEVideoAnalysisResult:
@@ -585,8 +594,8 @@ def analyze_cme_case(
         plaintiff_name: Name of plaintiff
         examiner_name: Name of examining doctor
         exam_date: Date of examination
-        api_key: Anthropic API key (or set ANTHROPIC_API_KEY env var)
-        model: "haiku", "sonnet", or "opus"
+        api_key: Provider API key (or set the selected provider env var)
+        model: Optional provider model id; legacy Claude shortcuts: "haiku", "sonnet", or "opus"
         frame_interval: Seconds between frame extractions
         output_dir: Directory to save frames and results
         
@@ -599,7 +608,7 @@ def analyze_cme_case(
         "sonnet": AnalysisModel.SONNET,
         "opus": AnalysisModel.OPUS
     }
-    analysis_model = model_map.get(model.lower(), AnalysisModel.SONNET)
+    analysis_model = model_map.get(model.lower(), model) if model else None
     
     # Initialize analyzer
     analyzer = CMEVisionAnalyzer(api_key=api_key, model=analysis_model)
@@ -638,10 +647,14 @@ if __name__ == "__main__":
     parser.add_argument("--plaintiff", help="Plaintiff name")
     parser.add_argument("--examiner", help="Examiner name")
     parser.add_argument("--date", help="Exam date")
-    parser.add_argument("--model", default="sonnet", choices=["haiku", "sonnet", "opus"])
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Provider model id; legacy Claude shortcuts: haiku, sonnet, opus",
+    )
     parser.add_argument("--interval", type=float, default=5.0, help="Seconds between frames")
     parser.add_argument("--output", help="Output directory")
-    parser.add_argument("--api-key", help="Anthropic API key")
+    parser.add_argument("--api-key", help="Provider API key")
     
     args = parser.parse_args()
     

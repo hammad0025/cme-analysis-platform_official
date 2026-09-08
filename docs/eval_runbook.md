@@ -45,10 +45,10 @@ The frame-level `frame_pass_rate` is `passed / evaluated`. The overall
 
 ## Running locally
 
-The default invocation is Anthropic-only and requires only one secret:
+The default invocation is OpenAI-only and requires one secret:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
 python scripts/eval_cme_vision.py
 ```
 
@@ -70,8 +70,8 @@ This:
   exits 0. No API calls. Used by CI smoke tests and by anyone vetting the
   manifest expansion.
 - `--passes comprehensive` runs only the comprehensive pass.
-- `--providers anthropic,openai` will evaluate the primary provider
-  (`anthropic`) and is wired for future per-provider grading; the current
+- `--providers openai,anthropic` will evaluate the primary provider
+  (`openai`) and is wired for future per-provider grading; the current
   scorer only grades the primary provider.
 - `--resume` skips per-frame outputs that already exist on disk under
   `<output-dir>/raw/<pass>/<clip>/<frame>.json`. Useful when an earlier
@@ -90,14 +90,16 @@ claim-verifier calls.
 Per the `PROVIDER_PRICING` table in
 `backend/lambda_functions/vision_client.py`:
 
-- Anthropic Claude Sonnet 4: ~$3/M input tokens, ~$15/M output tokens.
+- OpenAI `gpt-5.6-luna`: ~$0.20/M input tokens, ~$1.20/M output tokens.
   A single frame analysis call typically uses ~1500 input + ~600 output
-  tokens, so each call is roughly $0.014. **26 frames ~ $0.35-0.40 per
-  full eval run** in the steady state.
-- OpenAI `gpt-4o`: $2.50/M input + $10.00/M output. Order-of-magnitude
-  the same.
-- Gemini `gemini-2.5-pro`: $1.25/M input + $10.00/M output. Slightly
-  cheaper.
+  tokens, so each call is roughly $0.001. **26 frames ~ $0.03 per full
+  eval run** in the steady state.
+- OpenAI `gpt-6-astra`: reserved for the stronger, lower-volume reasoning
+  stage rather than the high-volume frame pass.
+- Anthropic Sonnet/Opus tiers remain available for explicit fallback or
+  historical comparison runs.
+- Gemini `gemini-2.5-pro`: $1.25/M input + $10.00/M output. Useful as
+  a comparison provider, but more expensive than the OpenAI default frame tier.
 
 Always read the `totals.estimated_cost_usd` field in
 `eval_summary.json` for the exact number; the eval sums
@@ -112,14 +114,14 @@ ways:
    gate; pushes to the PR branch without the label do nothing. Toggling
    the label off and back on retriggers the run via the `labeled` event.
 2. **Manually from the Actions tab** via `workflow_dispatch`. Inputs:
-   - `providers` (default `anthropic`)
+   - `providers` (default `openai`)
    - `threshold-pass-rate` (default `0.70`)
    - `compare-to-main` (default `true`; pull_request only)
 
 The workflow:
 
 - Checks out the PR head, installs `backend/requirements.txt` plus
-  `jsonschema` and `anthropic`.
+  `jsonschema`, `anthropic`, and `openai`.
 - Runs the eval against the PR head with the chosen threshold.
 - When `compare-to-main` is true and the trigger is a PR, attempts a
   second run against `origin/main` via `git worktree`, then re-runs the

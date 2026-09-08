@@ -10,9 +10,9 @@ Modes:
   --verifier  Local scripts/run_claim_verifier.py (text LLM verdicts)
 
 AI provider policy (single source of truth):
-  - Anthropic: required for --analyze and --verifier LLM paths (default provider)
+  - OpenAI: required for --analyze and --verifier LLM paths (default provider)
   - Perplexity: optional; only used when scripts are run with --with-research
-  - OpenAI / Gemini: off unless analyze_cme_full.py --providers includes them
+  - Anthropic / Gemini: off unless analyze_cme_full.py --providers includes them
   - AWS Bedrock: production Lambda only (IAM role; no local API key)
 """
 from __future__ import annotations
@@ -29,9 +29,9 @@ ALLOW_LOCAL_ENV = "CME_ALLOW_LOCAL_ANALYSIS"
 # (env_var, label, critical_for_modes)
 ENV_CHECKS: List[Tuple[str, str, frozenset]] = [
     (ALLOW_LOCAL_ENV, "local analysis cost gate (must be 1)", frozenset({"analyze", "verifier"})),
-    ("ANTHROPIC_API_KEY", "Anthropic (default vision + verifier LLM)", frozenset({"analyze", "verifier"})),
+    ("OPENAI_API_KEY", "OpenAI (default vision + verifier LLM)", frozenset({"analyze", "verifier"})),
+    ("ANTHROPIC_API_KEY", "Anthropic fallback (only with --providers anthropic,...)", frozenset()),
     ("PERPLEXITY_API_KEY", "Perplexity Sonar (only with --with-research)", frozenset()),
-    ("OPENAI_API_KEY", "OpenAI (only with --providers openai,...)", frozenset()),
     ("GOOGLE_API_KEY", "Google Gemini (only with --providers gemini,...)", frozenset()),
     ("GEMINI_API_KEY", "Gemini alias (optional fallback)", frozenset()),
 ]
@@ -73,9 +73,10 @@ def _status(name: str) -> str:
 
 def _print_provider_policy() -> None:
     print("\nAI provider policy:")
-    print("  Anthropic     required for --analyze / --verifier LLM runs (default provider)")
+    print("  OpenAI        required for --analyze / --verifier LLM runs (default provider)")
+    print("  Anthropic     optional fallback; set CME_VISION_PROVIDER=anthropic")
     print("  Perplexity    optional; only when --with-research is passed explicitly")
-    print("  OpenAI/Gemini off unless analyze_cme_full.py --providers includes them")
+    print("  Gemini        optional fallback; set --providers gemini or CME_VISION_PROVIDER=gemini")
     print("  AWS Bedrock   production Lambda only (IAM; no local key)")
 
 

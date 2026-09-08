@@ -45,7 +45,7 @@ def test_validate_analyze_ok_with_required_keys():
         "--analyze",
         env={
             "CME_ALLOW_LOCAL_ANALYSIS": "1",
-            "ANTHROPIC_API_KEY": "sk-ant-test",
+            "OPENAI_API_KEY": "sk-test",
         },
     )
     assert result.returncode == 0
@@ -53,12 +53,12 @@ def test_validate_analyze_ok_with_required_keys():
 
 
 def test_validate_never_prints_secret_values():
-    secret = "sk-ant-super-secret-value-12345"
+    secret = "sk-super-secret-value-12345"
     result = _run_validate(
         "--analyze",
         env={
             "CME_ALLOW_LOCAL_ANALYSIS": "1",
-            "ANTHROPIC_API_KEY": secret,
+            "OPENAI_API_KEY": secret,
         },
     )
     assert secret not in result.stdout

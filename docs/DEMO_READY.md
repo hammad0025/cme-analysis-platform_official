@@ -110,7 +110,8 @@ Smoke-tested 2026-05-30:
 - No building-exterior B-roll on physical-exam claims
 - Reflexes / coordination → `not_shown` with empty evidence (honest)
 
-Regenerate claim verdicts (~$0.05–0.20 text-only, **not** vision):
+Regenerate claim verdicts (text-only, **not** vision; default LLM estimate is
+~$0.15/claim, or use `--offline` for no API spend):
 
 ```bash
 cd /Users/hammadhaque/Documents/cme-analysis-platform
@@ -123,7 +124,7 @@ python3 scripts/link_local_analysis_to_session.py --session-id cme_6f506df9ebf9
 
 ## What NOT to click
 
-- **Do not** run `python analyze_cme_full.py` (~$20–50 Anthropic + vision).
+- **Do not** run `python analyze_cme_full.py` unless you intend a paid vision run.
 - **Do not** re-trigger `/process` on **cme_6f506df9ebf9** — analysis is linked.
 - **Do not** click **Start processing** on a new upload unless you intend Transcribe/Lambda cost.
 

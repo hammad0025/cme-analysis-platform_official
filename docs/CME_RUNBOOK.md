@@ -12,15 +12,16 @@ All commands run from the repo root. Costs are estimated up front and every paid
 ## 0. Prerequisites
 
 - `.env` (or exported env vars) with:
-  - `ANTHROPIC_API_KEY` — vision + LLM verifier (Tim's account for client runs)
-  - `PERPLEXITY_API_KEY` — literature research (Tim's enterprise account; opt-in via `--with-research`)
+  - `OPENAI_API_KEY` - default vision + LLM verifier (firm-controlled account for client runs)
+  - `ANTHROPIC_API_KEY` - optional fallback only when `--providers anthropic` or `CME_VISION_PROVIDER=anthropic`
+  - `PERPLEXITY_API_KEY` - literature research (firm enterprise account; opt-in via `--with-research`)
   - AWS credentials with access to the `cme-analysis-recordings-*` bucket and `cme-sessions` table (for session linking)
 - `CME_ALLOW_LOCAL_ANALYSIS=1` must be set to run any paid local analysis (hard cost gate).
 - `ffmpeg` installed (frame extraction), `python3` with `backend/requirements.txt` installed.
 - Validate before starting:
 
 ```bash
-python3 scripts/validate_env.py
+python3 scripts/validate_env.py --analyze
 ```
 
 HIPAA note: client-facing runs go through the AWS pipeline where Macie anonymizes PII before AI calls. Perplexity is on Tim's enterprise license (no training on our data). Do not commit videos, reports, or `.env`.
@@ -39,7 +40,7 @@ mkdir -p "$CASE"
 python3 scripts/estimate_cme_cost.py "$CASE/video.mp4" --preset standard
 ```
 
-Presets: `standard` (5s interval), `high`, `max`, `half_second`. A ~40-minute video at `standard` is roughly $14 in vision calls; `half_second` is ~10x that. Get a yes on the number before proceeding.
+Presets: `standard` (5s interval), `high`, `max`, `half_second`. A ~40-minute video at `standard` is roughly $5 in OpenAI default vision calls before transcript and verifier work; `half_second` is ~10x that. Get a yes on the number before proceeding.
 
 ## 3. Extract claims from the doctor's report (cheap, one LLM call)
 
@@ -87,7 +88,7 @@ python3 scripts/run_claim_verifier.py \
 
 `--no-sample` matters for non-Osborne cases: without it the script copies this case's verdicts into `frontend/public/sample-case/`, overwriting the public demo data.
 
-- Use `--dry-run` first to see the LLM verifier cost (typically well under $1).
+- Use `--dry-run` first to see the LLM verifier cost (roughly $0.15 per claim with the default verifier estimate).
 - `--offline` runs the free heuristic verifier (labels are weaker; fine for smoke tests, not for client reports).
 - Produces `claim_verdicts.json` with per-claim verdict, evidence, timestamps, and the `cross_examination` block (leading question, report citation, video finding, literature refs).
 
@@ -147,7 +148,7 @@ Ask them to line the report up against Oregon's manual analysis and mark anythin
 |---|---|
 | "Local analysis disabled" error | `export CME_ALLOW_LOCAL_ANALYSIS=1` |
 | Run stops mid-vision-pass | Re-run same command with `--resume` |
-| All verdicts "insufficient evidence — model output unparseable" | Model ID is stale; check `DEFAULT_SONNET_MODEL` in `backend/lambda_functions/cme_analysis_utils.py` |
+| All verdicts "insufficient evidence — model output unparseable" | Model ID is stale; check `DEFAULT_OPENAI_VERIFIER_MODEL`, `DEFAULT_OPENAI_VISION_MODEL`, and provider defaults in `backend/lambda_functions/cme_analysis_utils.py` |
 | `--with-research` warning about missing key | Set `PERPLEXITY_API_KEY` (Tim's enterprise account) |
 | H.264 decode warnings during frame extraction | Usually harmless; if frames come out corrupt, re-encode first: `ffmpeg -i in.mkv -c:v libx264 -crf 18 out.mp4` |
 | `.mpg` or other odd container fails | Re-encode to mp4 as above before running |

@@ -7,7 +7,7 @@ transcript file.
 
 The transcription pass is OPTIONAL by design. The default
 `python analyze_cme_full.py video.mp4` flow still works with only
-`ANTHROPIC_API_KEY` set: when no ASR backend is available, the
+`OPENAI_API_KEY` set: when no ASR backend is available, the
 transcription step prints a clear skip message and the pipeline
 proceeds with the visual-only passes, exactly as it did pre-A3.
 

@@ -38,6 +38,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from backend.lambda_functions.cme_analysis_utils import (
+    DEFAULT_AI_PROVIDER,
+    DEFAULT_OPENAI_VISION_MODEL,
     DEFAULT_SONNET_MODEL,
     PRESET_INTERVALS,
     append_cost_history,
@@ -492,13 +494,21 @@ def main():
         help="Sleep before each frame API call (429 mitigation)",
     )
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoint JSONL")
-    parser.add_argument("--model", default=None, help=f"Primary-provider model (default {DEFAULT_SONNET_MODEL} for anthropic)")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Primary-provider frame model "
+            f"(default {DEFAULT_OPENAI_VISION_MODEL} for openai; "
+            f"{DEFAULT_SONNET_MODEL} for anthropic)"
+        ),
+    )
     parser.add_argument(
         "--providers",
-        default="anthropic",
+        default=DEFAULT_AI_PROVIDER,
         help=(
             "Comma-separated vision providers; first one is primary. "
-            f"Supported: {','.join(SUPPORTED_PROVIDERS)}. Default: anthropic."
+            f"Supported: {','.join(SUPPORTED_PROVIDERS)}. Default: {DEFAULT_AI_PROVIDER}."
         ),
     )
     parser.add_argument(
@@ -551,9 +561,9 @@ def main():
         print("For estimates over $5 you must also pass --confirm-cost or --yes.")
         sys.exit(1)
 
-    providers = [p.strip().lower() for p in (args.providers or "anthropic").split(",") if p.strip()]
+    providers = [p.strip().lower() for p in (args.providers or DEFAULT_AI_PROVIDER).split(",") if p.strip()]
     if not providers:
-        providers = ["anthropic"]
+        providers = [DEFAULT_AI_PROVIDER]
     for p in providers:
         if p not in SUPPORTED_PROVIDERS:
             print(f"ERROR: Unsupported provider {p!r}. Supported: {SUPPORTED_PROVIDERS}")
@@ -569,8 +579,8 @@ def main():
 
     primary_model = args.model or default_model_for(primary_provider)
 
-    # API key check is per-primary-provider so behavior with the default
-    # "anthropic" provider is identical to the prior implementation.
+    # API key check is per-primary-provider. OpenAI is the default provider;
+    # Anthropic and Gemini remain explicit fallback choices.
     primary_env_var = PROVIDER_ENV_VAR[primary_provider]
     primary_api_key = args.api_key or os.environ.get(primary_env_var)
     if primary_provider == "gemini" and not primary_api_key:
@@ -588,7 +598,7 @@ def main():
             print("\nGet your key: https://platform.openai.com/api-keys")
             print("\nThen run:")
             print("  export OPENAI_API_KEY='sk-...'")
-            print("  python analyze_cme_full.py video.mp4 --providers openai")
+            print("  python analyze_cme_full.py video.mp4")
         else:
             print("\nGet your key: https://aistudio.google.com/apikey")
             print("\nThen run:")
