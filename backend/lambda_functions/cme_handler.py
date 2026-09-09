@@ -433,7 +433,7 @@ def handle_get_cme_session(session_id: str) -> Dict[str, Any]:
         if 'completed_at' in session:
             session['completed_at'] = int(session['completed_at'])
 
-        if session.get('status') == 'completed':
+        if session.get('status') in ('completed', 'completed_with_warnings'):
             session = _attach_artifact_urls(session)
         else:
             session = _attach_playback_urls(session)
@@ -855,6 +855,20 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
         if not session:
             return create_response(404, {'error': 'CME session not found'})
 
+        current_status = str(session.get('status') or '').lower()
+        if current_status == 'processing':
+            return create_response(409, {
+                'error': 'Processing is already running for this session. Refresh the case page for live status.',
+            })
+        if current_status in ('completed', 'completed_with_warnings'):
+            return create_response(409, {
+                'error': 'This session already has a completed report. Create a new case to run another analysis.',
+            })
+        if current_status == 'cancelled':
+            return create_response(409, {
+                'error': 'This session was cancelled and cannot be restarted. Create a new case to continue.',
+            })
+
         unique_id = str(uuid.uuid4())[:8]
         safe_filename = _safe_storage_filename(filename)
         now_ts = int(time.time())
@@ -1059,7 +1073,21 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
         
         if not session:
             return create_response(404, {'error': 'CME session not found'})
-        
+
+        current_status = str(session.get('status') or '').lower()
+        if current_status == 'processing':
+            return create_response(409, {
+                'error': 'Processing is already running for this session. Refresh the case page for live status.',
+            })
+        if current_status in ('completed', 'completed_with_warnings'):
+            return create_response(409, {
+                'error': 'This session already has a completed report. Create a new case to run another analysis.',
+            })
+        if current_status == 'cancelled':
+            return create_response(409, {
+                'error': 'This session was cancelled and cannot be restarted. Create a new case to continue.',
+            })
+
         # Get recordings list (support old single video_uri storage)
         recordings = session.get('recordings', [])
         if not recordings and session.get('video_uri'):
@@ -1129,16 +1157,22 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
             })
 
         # Update session status
+        processing_started_at = int(time.time())
         sessions_table.update_item(
             Key={'session_id': session_id},
-            UpdateExpression='SET #status = :status, processing_stage = :stage, updated_at = :updated',
+            UpdateExpression=(
+                'SET #status = :status, processing_stage = :stage, '
+                'processing_started_at = :started, updated_at = :updated '
+                'REMOVE last_error, analysis_warning, transcript_uri, transcription_jobs'
+            ),
             ExpressionAttributeNames={
                 '#status': 'status'  # 'status' is a reserved keyword in DynamoDB
             },
             ExpressionAttributeValues={
                 ':status': 'processing',
                 ':stage': 'transcription',
-                ':updated': int(time.time())
+                ':started': processing_started_at,
+                ':updated': processing_started_at,
             }
         )
         

@@ -205,6 +205,9 @@ export default function CaseProcessing() {
                     ? caseData.last_error
                     : 'The pipeline hit an error and stopped. Your uploads are safe — contact support or retry processing.'}
                 </p>
+                <Link to={`/sessions/${caseId}`} className="inline-flex mt-3">
+                  <Button variant="secondary" size="sm">Manage and retry case</Button>
+                </Link>
               </div>
             </div>
           </div>

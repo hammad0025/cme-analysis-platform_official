@@ -104,6 +104,7 @@ export default function SessionDetail() {
   const [notFound, setNotFound] = useState(false);
   const [activeTab, setActiveTab] = useState(deepLinkSeekSec != null ? 'tests' : 'overview');
   const [uploading, setUploading] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const defaultTabApplied = useRef(deepLinkSeekSec != null);
 
   const loadSession = useCallback(async () => {
@@ -222,6 +223,19 @@ export default function SessionDetail() {
     }
   };
 
+  const onRestartProcessing = async () => {
+    setRestarting(true);
+    try {
+      await api.post('/cme/process', { session_id: sessionId });
+      await loadSession();
+    } catch (error) {
+      console.error(error);
+      alert(error.response?.data?.error || 'Failed to restart processing');
+    } finally {
+      setRestarting(false);
+    }
+  };
+
   const handleOpenPdfReport = async () => {
     if (pdfUrl) {
       window.open(pdfUrl, '_blank');
@@ -281,7 +295,12 @@ export default function SessionDetail() {
     );
   }
 
-  const canEditMaterials = !linkedAnalysis && (session.status === 'created' || session.status === 'recording_uploaded');
+  const canEditMaterials = !linkedAnalysis && (
+    session.status === 'created'
+    || session.status === 'recording_uploaded'
+    || session.status === 'error'
+    || session.status === 'failed'
+  );
   const hasRecordings = Boolean(
     (session.recordings && session.recordings.length > 0) ||
       (session.video_uri && session.video_uri !== '') ||
@@ -404,7 +423,14 @@ export default function SessionDetail() {
       </div>
 
       <main className="mt-6">
-        {isTerminalFailure && <TerminalStatusBanner session={session} />}
+        {isTerminalFailure && (
+          <TerminalStatusBanner
+            session={session}
+            canRetry={session.status !== 'cancelled' && hasRecordings}
+            restarting={restarting}
+            onRetry={onRestartProcessing}
+          />
+        )}
         <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
           {activeTab === 'overview' && (
             <OverviewTab
@@ -609,12 +635,12 @@ function OverviewTab({ session, metrics, linkedAnalysis, artifactUrls, hasRecord
   );
 }
 
-function TerminalStatusBanner({ session }) {
+function TerminalStatusBanner({ session, canRetry, restarting, onRetry }) {
   const isCancelled = session.status === 'cancelled';
   const defaultMessage = isCancelled
     ? 'This session was cancelled and will not continue processing.'
     : 'Processing failed for this session.';
-  const message = session.error_message || defaultMessage;
+  const message = session.error_message || session.last_error || defaultMessage;
 
   return (
     <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-6 shadow-sm">
@@ -633,6 +659,16 @@ function TerminalStatusBanner({ session }) {
             <p className="text-xs text-red-600 mt-2 font-mono">Stage: {session.processing_stage}</p>
           )}
           <div className="mt-4 flex flex-wrap gap-3">
+            {canRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={restarting}
+                className="inline-flex items-center justify-center h-9 px-4 text-sm font-semibold rounded-lg bg-red-700 text-white hover:bg-red-800 disabled:opacity-60 transition-colors"
+              >
+                {restarting ? 'Restarting...' : 'Retry processing'}
+              </button>
+            )}
             <Link
               to="/"
               className="inline-flex items-center justify-center h-9 px-4 text-sm font-semibold rounded-lg bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 transition-colors"
@@ -1204,8 +1240,6 @@ function TimelineTab({ session, artifactUrls, linkedAnalysis, pdfUrl, pdfLoading
   );
 }
 
-const SLOT_OPTIONS = Array.from({ length: 20 }, (_, i) => i + 1);
-
 function formatBytes(n) {
   if (n == null || !Number.isFinite(Number(n))) return null;
   const b = Number(n);
@@ -1234,32 +1268,16 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
     return [];
   }, [session.recordings, session.video_uri]);
 
-  const usedSlots = useMemo(() => {
-    const s = new Set();
-    recordings.forEach((r) => {
-      if (r.recording_slot != null && r.recording_slot !== '') {
-        const n = Number(r.recording_slot);
-        if (Number.isFinite(n)) s.add(n);
-      }
-    });
-    return s;
-  }, [recordings]);
-
   const onVideoFilesChosen = (e) => {
-    const files = Array.from(e.target.files || []);
-    const start = pendingVideos.length;
-    const next = files.map((file, i) => ({
-      key: `${file.name}-${Date.now()}-${start + i}`,
-      file,
-      slot: start + i + 1,
-    }));
-    setPendingVideos((p) => [...p, ...next]);
+    const file = e.target.files?.[0];
+    if (file) {
+      setPendingVideos([{
+        key: `${file.name}-${Date.now()}`,
+        file,
+        slot: 1,
+      }]);
+    }
     e.target.value = '';
-  };
-
-  const setRowSlot = (key, slot) => {
-    const n = Number(slot);
-    setPendingVideos((rows) => rows.map((r) => (r.key === key ? { ...r, slot: n } : r)));
   };
 
   const removePending = (key) => {
@@ -1268,21 +1286,6 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
 
   const submitPendingVideos = async () => {
     if (!pendingVideos.length) return;
-    const slots = pendingVideos.map((r) => r.slot);
-    if (slots.some((s) => !Number.isFinite(s) || s < 1)) {
-      alert('Each file needs a valid video number (1–20).');
-      return;
-    }
-    if (new Set(slots).size !== slots.length) {
-      alert('Each video must have a unique number in this batch (Video 1, Video 2, …).');
-      return;
-    }
-    for (const row of pendingVideos) {
-      if (usedSlots.has(row.slot)) {
-        alert(`Video ${row.slot} is already uploaded. Remove it from the session or pick another number.`);
-        return;
-      }
-    }
     await onUploadVideos(pendingVideos.map(({ file, slot }) => ({ file, slot })));
     setPendingVideos([]);
   };
@@ -1398,7 +1401,7 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
           <div>
             <h2 className="text-lg font-bold text-slate-900">CME recordings</h2>
             <p className="text-sm text-slate-600">
-              Multiple files are labeled <strong>Video 1</strong>, <strong>Video 2</strong>, … for processing order.
+              One combined recording is supported per live case. Uploading a new file replaces Video 1 before processing starts.
             </p>
           </div>
         </div>
@@ -1446,19 +1449,18 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
             Analysis is linked but no recording is attached yet. Refresh after the session bundle script completes.
           </p>
         ) : (
-          <p className="text-sm text-slate-500 mb-6">No recordings yet. Add one or more video or audio files below.</p>
+          <p className="text-sm text-slate-500 mb-6">No recording yet. Add one video or audio file below.</p>
         )}
 
         {canEdit && (
           <>
             <div className="border border-dashed border-slate-300 rounded-xl p-4 mb-4">
-              <p className="text-sm text-slate-600 mb-3">Add files to the queue, set each to Video 1 / 2 / 3…, then upload.</p>
+              <p className="text-sm text-slate-600 mb-3">Choose one combined recording. Selecting a new file replaces the pending upload.</p>
               <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg cursor-pointer hover:bg-blue-700">
-                Choose video / audio files
+                Choose recording
                 <input
                   type="file"
-                  accept="video/*,audio/*,.mp4,.mp3,.mpeg,.mpg,.wav,.mov,.m4a"
-                  multiple
+                  accept="video/*,audio/*,.mp4,.mov,.m4v,.webm,.mp3,.m4a,.wav,.flac,.ogg,.amr"
                   className="hidden"
                   disabled={uploading}
                   onChange={onVideoFilesChosen}
@@ -1472,7 +1474,6 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
                   <thead>
                     <tr className="text-left text-slate-500 border-b border-slate-200">
                       <th className="py-2 pr-4">File</th>
-                      <th className="py-2 pr-4">Slot</th>
                       <th className="py-2"></th>
                     </tr>
                   </thead>
@@ -1480,19 +1481,6 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
                     {pendingVideos.map((row) => (
                       <tr key={row.key} className="border-b border-slate-100">
                         <td className="py-2 pr-4 max-w-xs truncate">{row.file.name}</td>
-                        <td className="py-2 pr-4">
-                          <select
-                            value={row.slot}
-                            onChange={(e) => setRowSlot(row.key, e.target.value)}
-                            className="rounded-lg border border-slate-300 px-2 py-1 bg-white"
-                          >
-                            {SLOT_OPTIONS.map((n) => (
-                              <option key={n} value={n}>
-                                Video {n}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
                         <td className="py-2">
                           <button type="button" onClick={() => removePending(row.key)} className="text-red-600 hover:underline">
                             Remove
@@ -1508,7 +1496,7 @@ function RecordingTab({ session, linkedAnalysis, metrics, canEdit, hasRecordings
                   onClick={submitPendingVideos}
                   className="mt-4 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50"
                 >
-                  {uploading ? 'Uploading…' : `Upload ${pendingVideos.length} file(s)`}
+                  {uploading ? 'Uploading...' : 'Upload recording'}
                 </button>
               </div>
             )}

@@ -47,6 +47,15 @@ class _FakeS3:
         return {"ContentLength": 123}
 
 
+class _FakeStepFunctions:
+    def __init__(self):
+        self.executions = []
+
+    def start_execution(self, **kwargs):
+        self.executions.append(kwargs)
+        return {"executionArn": "arn:aws:states:us-east-1:123456789012:execution:cme:test"}
+
+
 def _body(response):
     return json.loads(response["body"])
 
@@ -142,3 +151,55 @@ def test_processing_refuses_multi_recording_sessions(monkeypatch):
 
     assert response["statusCode"] == 409
     assert "only one recording" in _body(response)["error"].lower()
+
+
+def test_processing_refuses_duplicate_start_for_active_session(monkeypatch):
+    table = _FakeTable({
+        "session_id": "cme_test",
+        "status": "processing",
+        "recordings": [{
+            "uri": "s3://cme-analysis-recordings-388846700527/cme-recordings/cme_test/exam.mp4",
+            "s3_key": "cme-recordings/cme_test/exam.mp4",
+            "filename": "exam.mp4",
+            "recording_slot": 1,
+        }],
+    })
+    monkeypatch.setattr(cme_handler, "dynamodb", _FakeDynamo(table))
+
+    response = cme_handler.handle_start_cme_processing({"session_id": "cme_test"})
+
+    assert response["statusCode"] == 409
+    assert "already running" in _body(response)["error"].lower()
+    assert table.updates == []
+
+
+def test_processing_records_start_time_and_clears_stale_state(monkeypatch):
+    table = _FakeTable({
+        "session_id": "cme_test",
+        "status": "error",
+        "recordings": [{
+            "uri": "s3://cme-analysis-recordings-388846700527/cme-recordings/cme_test/exam.mp4",
+            "s3_key": "cme-recordings/cme_test/exam.mp4",
+            "filename": "exam.mp4",
+            "recording_slot": 1,
+        }],
+    })
+    step_functions = _FakeStepFunctions()
+    monkeypatch.setattr(cme_handler, "dynamodb", _FakeDynamo(table))
+    monkeypatch.setattr(cme_handler, "s3_client", _FakeS3())
+    monkeypatch.setattr(cme_handler, "stepfunctions_client", step_functions)
+    monkeypatch.setattr(cme_handler, "STEP_FUNCTION_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:cme")
+    monkeypatch.setattr(
+        cme_handler,
+        "start_transcription_job",
+        lambda *_args, **_kwargs: {"job_name": "cme-test-transcription"},
+    )
+
+    response = cme_handler.handle_start_cme_processing({"session_id": "cme_test"})
+
+    assert response["statusCode"] == 200
+    first_update = table.updates[0]
+    assert "processing_started_at = :started" in first_update["UpdateExpression"]
+    assert "REMOVE last_error" in first_update["UpdateExpression"]
+    assert first_update["ExpressionAttributeValues"][":started"] == first_update["ExpressionAttributeValues"][":updated"]
+    assert step_functions.executions

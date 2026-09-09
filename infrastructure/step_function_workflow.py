@@ -134,13 +134,19 @@ def create_cme_processing_workflow(
                 sfn.JsonPath.string_at("$.session_id")
             )
         },
-        update_expression="SET #status = :error, processing_stage = :stage",
+        update_expression=(
+            "SET #status = :error, processing_stage = :stage, "
+            "last_error = :last_error"
+        ),
         expression_attribute_names={
             "#status": "status"
         },
         expression_attribute_values={
             ":error": tasks.DynamoAttributeValue.from_string("error"),
-            ":stage": tasks.DynamoAttributeValue.from_string("failed")
+            ":stage": tasks.DynamoAttributeValue.from_string("failed"),
+            ":last_error": tasks.DynamoAttributeValue.from_string(
+                "The analysis pipeline stopped before the report was generated. Retry processing or replace the recording if the upload may be incomplete."
+            ),
         }
     )
     

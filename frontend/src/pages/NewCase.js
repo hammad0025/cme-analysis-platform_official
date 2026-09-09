@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import Button from '../components/Button';
 import StepIndicator from '../components/case/StepIndicator';
@@ -73,6 +73,7 @@ export default function NewCase() {
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState({});
   const [submitError, setSubmitError] = useState('');
+  const [recoveryCaseId, setRecoveryCaseId] = useState('');
   const [submitPhase, setSubmitPhase] = useState('');
   const cancelRefs = useRef([]);
   const inFlightCaseId = useRef(null);
@@ -298,6 +299,7 @@ export default function NewCase() {
   const onSubmit = async () => {
     if (!canSubmit) return;
     setSubmitError('');
+    setRecoveryCaseId('');
     setSubmitPhase('Preparing case record...');
     setSubmitting(true);
     setProgress({});
@@ -381,6 +383,9 @@ export default function NewCase() {
         setSubmitError('Upload cancelled. The case was discarded.');
       } else {
         setSubmitError(err?.message || 'Upload failed. Please try again.');
+        if (createdCase && !mock) {
+          setRecoveryCaseId(createdCase.case_id);
+        }
       }
       setSubmitPhase('');
       inFlightCaseId.current = null;
@@ -495,6 +500,11 @@ export default function NewCase() {
             {submitting ? 'Cancel upload' : step === 1 ? 'Cancel' : 'Back'}
           </Button>
           <div className="flex items-center gap-3">
+            {recoveryCaseId && !submitting && (
+              <Link to={`/sessions/${recoveryCaseId}`}>
+                <Button variant="secondary" size="md">Open uploaded case</Button>
+              </Link>
+            )}
             {step < 4 && (
               <Button variant="primary" size="md" onClick={() => goToStep(step + 1)}>
                 Continue
