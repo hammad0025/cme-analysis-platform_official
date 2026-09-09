@@ -41,6 +41,7 @@ REPORT_GENERATOR_FUNCTION = os.environ.get('REPORT_GENERATOR_FUNCTION', 'cme-rep
 # If a session sits in the same stage longer than this, the GET-poll
 # fallback re-invokes the next pipeline step instead of waiting forever.
 STUCK_STAGE_RETRY_SEC = 15 * 60
+MAX_RECORDING_BYTES = 5 * 1024 * 1024 * 1024
 
 # State configurations for recording permissions
 STATE_RECORDING_RULES = {
@@ -648,6 +649,16 @@ def _recording_slot_as_int(val: Any) -> Optional[int]:
         return None
 
 
+def _recording_size_as_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        return None
+    return size if size > 0 else None
+
+
 def _safe_storage_filename(filename: str, max_len: int = 80) -> str:
     """Sanitize filename for S3 keys; preserve extension when truncating."""
     cleaned = (filename or 'recording').replace(' ', '_').replace('/', '_')
@@ -945,6 +956,16 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
         if not is_video and not is_audio:
             return create_response(400, {'error': 'File must be video or audio format'})
 
+        normalized_file_size = _recording_size_as_int(file_size)
+        if normalized_file_size is None:
+            return create_response(400, {
+                'error': 'A positive file_size is required for a recording upload.',
+            })
+        if normalized_file_size > MAX_RECORDING_BYTES:
+            return create_response(413, {
+                'error': 'Recording exceeds the 5 GB upload limit. Split or compress the recording before uploading.',
+            })
+
         s3_key = f"cme-recordings/{session_id}/{unique_id}_{safe_filename}"
 
         presigned_url = s3_client.generate_presigned_url(
@@ -1009,7 +1030,7 @@ def handle_upload_cme_recording(body: Dict[str, Any]) -> Dict[str, Any]:
             's3_key': s3_key,
             'filename': filename,
             'content_type': content_type,
-            'file_size': file_size,
+            'file_size': normalized_file_size,
             'uploaded_at': now_ts,
             'recording_slot': recording_slot,
             'display_label': f'Video {recording_slot}',
@@ -1134,7 +1155,7 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             bucket, key = parsed
             try:
-                s3_client.head_object(Bucket=bucket, Key=key)
+                head_response = s3_client.head_object(Bucket=bucket, Key=key)
             except Exception as head_err:
                 error_code = (
                     head_err.response.get('Error', {}).get('Code', '')
@@ -1150,9 +1171,28 @@ def handle_start_cme_processing(body: Dict[str, Any]) -> Dict[str, Any]:
                     continue
                 raise
 
+            actual_size = _recording_size_as_int(head_response.get('ContentLength'))
+            if actual_size is None:
+                missing_uploads.append({
+                    'filename': recording.get('filename') or key,
+                    's3_key': key,
+                    'reason': 'upload_empty',
+                })
+                continue
+
+            expected_size = _recording_size_as_int(recording.get('file_size'))
+            if expected_size is not None and actual_size != expected_size:
+                missing_uploads.append({
+                    'filename': recording.get('filename') or key,
+                    's3_key': key,
+                    'reason': 'upload_size_mismatch',
+                    'expected_size': expected_size,
+                    'actual_size': actual_size,
+                })
+
         if missing_uploads:
             return create_response(409, {
-                'error': 'One or more recording uploads have not finished. Please retry the upload before starting processing.',
+                'error': 'One or more recording uploads are missing, empty, or incomplete. Please retry the upload before starting processing.',
                 'missing_recordings': missing_uploads,
             })
 

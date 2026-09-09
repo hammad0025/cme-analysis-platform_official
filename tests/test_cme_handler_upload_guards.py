@@ -32,8 +32,9 @@ class _FakeDynamo:
 
 
 class _FakeS3:
-    def __init__(self, missing=False):
+    def __init__(self, missing=False, content_length=123):
         self.missing = missing
+        self.content_length = content_length
 
     def generate_presigned_url(self, *_args, **_kwargs):
         return "https://example.invalid/presigned"
@@ -44,7 +45,7 @@ class _FakeS3:
                 {"Error": {"Code": "404", "Message": "Not Found"}},
                 "HeadObject",
             )
-        return {"ContentLength": 123}
+        return {"ContentLength": self.content_length}
 
 
 class _FakeStepFunctions:
@@ -124,6 +125,71 @@ def test_processing_refuses_to_start_when_presigned_upload_missing(monkeypatch):
     assert response["statusCode"] == 409
     body = _body(response)
     assert body["missing_recordings"][0]["reason"] == "upload_not_found"
+
+
+def test_processing_refuses_to_start_when_upload_is_empty(monkeypatch):
+    table = _FakeTable({
+        "session_id": "cme_test",
+        "recordings": [{
+            "uri": "s3://cme-analysis-recordings-388846700527/cme-recordings/cme_test/empty.mp4",
+            "s3_key": "cme-recordings/cme_test/empty.mp4",
+            "filename": "empty.mp4",
+            "recording_slot": 1,
+        }],
+    })
+    monkeypatch.setattr(cme_handler, "dynamodb", _FakeDynamo(table))
+    monkeypatch.setattr(cme_handler, "s3_client", _FakeS3(content_length=0))
+
+    response = cme_handler.handle_start_cme_processing({"session_id": "cme_test"})
+
+    assert response["statusCode"] == 409
+    assert _body(response)["missing_recordings"][0]["reason"] == "upload_empty"
+    assert table.updates == []
+
+
+def test_processing_refuses_to_start_when_upload_size_differs(monkeypatch):
+    table = _FakeTable({
+        "session_id": "cme_test",
+        "recordings": [{
+            "uri": "s3://cme-analysis-recordings-388846700527/cme-recordings/cme_test/truncated.mp4",
+            "s3_key": "cme-recordings/cme_test/truncated.mp4",
+            "filename": "truncated.mp4",
+            "file_size": 200,
+            "recording_slot": 1,
+        }],
+    })
+    monkeypatch.setattr(cme_handler, "dynamodb", _FakeDynamo(table))
+    monkeypatch.setattr(cme_handler, "s3_client", _FakeS3(content_length=123))
+
+    response = cme_handler.handle_start_cme_processing({"session_id": "cme_test"})
+
+    assert response["statusCode"] == 409
+    issue = _body(response)["missing_recordings"][0]
+    assert issue["reason"] == "upload_size_mismatch"
+    assert issue["expected_size"] == 200
+    assert issue["actual_size"] == 123
+    assert table.updates == []
+
+
+def test_upload_rejects_missing_recording_size(monkeypatch):
+    table = _FakeTable({
+        "session_id": "cme_test",
+        "recording_allowed": {"video": True, "audio": True},
+        "state": "FL",
+    })
+    monkeypatch.setattr(cme_handler, "dynamodb", _FakeDynamo(table))
+    monkeypatch.setattr(cme_handler, "s3_client", _FakeS3())
+
+    response = cme_handler.handle_upload_cme_recording({
+        "session_id": "cme_test",
+        "filename": "exam.mp4",
+        "content_type": "video/mp4",
+        "file_size": 0,
+    })
+
+    assert response["statusCode"] == 400
+    assert "file_size" in _body(response)["error"]
+    assert table.updates == []
 
 
 def test_processing_refuses_multi_recording_sessions(monkeypatch):
