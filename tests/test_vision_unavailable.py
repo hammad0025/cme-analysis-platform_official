@@ -487,6 +487,7 @@ def test_process_result_marks_unavailable_status(processor, monkeypatch):
 
     assert result["motion_present"] == "analysis_unavailable"
     assert result["status"] == "analysis_unavailable"
+    assert persisted["item"]["session_id"] == "cme_test"
     assert persisted["item"]["analysis_details"]["analysis_error"] == "vision_model_unavailable"
 
 

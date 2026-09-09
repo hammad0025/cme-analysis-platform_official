@@ -394,14 +394,21 @@ class CMEReportGenerator:
             
             # Get observed actions
             actions_table = dynamodb.Table(os.environ.get('CME_ACTIONS_TABLE', 'cme-observed-actions'))
-            actions_response = actions_table.scan()
+            actions_response = actions_table.scan(
+                FilterExpression='session_id = :sid',
+                ExpressionAttributeValues={':sid': session_id}
+            )
             all_actions = actions_response.get('Items', [])
+            declared_step_ids = {
+                step.get('declared_step_id') for step in declared_steps
+                if step.get('declared_step_id')
+            }
             
             # Map actions to steps
             step_actions = {}
             for action in all_actions:
                 step_id = action.get('declared_step_id')
-                if step_id:
+                if step_id in declared_step_ids:
                     step_actions[step_id] = action
             
             # Get demeanor flags
@@ -459,7 +466,7 @@ class CMEReportGenerator:
                 pass
             
             # NEW: Gather attention/distraction data and detect inattentive test administration
-            distraction_events = self._gather_attention_data(session_id, step_actions)
+            distraction_events = self._gather_attention_data(step_actions)
             inattentive_tests = self._detect_inattentive_test_administration(declared_steps, distraction_events)
             
             return {
@@ -571,7 +578,7 @@ class CMEReportGenerator:
         logger.info(f"Detected {len(inattentive_tests)} inattentive test administrations")
         return inattentive_tests
     
-    def _gather_attention_data(self, session_id: str, step_actions: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _gather_attention_data(self, step_actions: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Gather doctor attention/distraction data for a session
         This could come from:
@@ -595,27 +602,6 @@ class CMEReportGenerator:
                         events = attention_data.get('distraction_events', [])
                         distraction_events.extend(events)
             
-            # Also scan all actions to find any with attention data
-            try:
-                actions_table = dynamodb.Table(os.environ.get('CME_ACTIONS_TABLE', 'cme-observed-actions'))
-                actions_response = actions_table.scan()
-                actions = actions_response.get('Items', [])
-                
-                # Filter actions that belong to declared steps for this session
-                # (We'll match via declared_step_id which links to declared_steps)
-                for action in actions:
-                    analysis_details = action.get('analysis_details', {})
-                    if isinstance(analysis_details, dict):
-                        attention_data = analysis_details.get('attention_analysis', {})
-                        if attention_data:
-                            events = attention_data.get('distraction_events', [])
-                            # Only add if not already in list
-                            for event in events:
-                                if event not in distraction_events:
-                                    distraction_events.append(event)
-            except Exception as e:
-                logger.warning(f"Error scanning actions table: {str(e)}")
-                
         except Exception as e:
             logger.warning(f"Error gathering attention data: {str(e)}")
         

@@ -1358,6 +1358,7 @@ def process_video_for_cme_test(
     action_id = f"action_{int(time.time())}"
     action_item = {
         'observed_action_id': action_id,
+        'session_id': session_id,
         'declared_step_id': declared_step_id,
         'motion_present': motion_present,
         'pose_match': pose_match,

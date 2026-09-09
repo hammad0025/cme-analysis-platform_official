@@ -77,3 +77,54 @@ def test_report_update_uses_warning_status_for_incomplete_analysis(
     assert values[":tests_unanalyzed"] == 2
     assert values[":total_declared_tests"] == 3
     assert "2 of 3" in values[":analysis_warning"]
+
+
+def test_session_data_only_uses_actions_owned_by_the_session(
+    report_generator, monkeypatch
+):
+    action_queries = []
+
+    class _Table:
+        def __init__(self, name):
+            self.name = name
+
+        def get_item(self, **_kwargs):
+            return {"Item": {"session_id": "case_one"}}
+
+        def scan(self, **kwargs):
+            if self.name == "cme-declared-steps":
+                return {"Items": [{"declared_step_id": "step_one", "timestamp": 1}]}
+            if self.name == "cme-observed-actions":
+                action_queries.append(kwargs)
+                return {
+                    "Items": [
+                        {
+                            "session_id": "case_one",
+                            "declared_step_id": "step_one",
+                            "motion_present": "performed",
+                        }
+                    ]
+                }
+            return {"Items": []}
+
+    class _Dynamo:
+        def Table(self, name):
+            return _Table(name)
+
+    monkeypatch.setattr(report_generator, "dynamodb", _Dynamo())
+
+    data = report_generator.CMEReportGenerator("bucket")._gather_session_data("case_one")
+
+    assert data["step_actions"] == {
+        "step_one": {
+            "session_id": "case_one",
+            "declared_step_id": "step_one",
+            "motion_present": "performed",
+        }
+    }
+    assert action_queries == [
+        {
+            "FilterExpression": "session_id = :sid",
+            "ExpressionAttributeValues": {":sid": "case_one"},
+        }
+    ]
